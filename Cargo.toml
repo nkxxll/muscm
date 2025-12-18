@@ -1,0 +1,14 @@
+[package]
+name = "muscm"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "muscm"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.100"
