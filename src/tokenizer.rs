@@ -1,6 +1,8 @@
 //! Tokenizer for Scheme expressions
 //! Based on TinyScheme tokenization logic
 
+use std::fmt;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenType {
     LParen,
@@ -16,6 +18,26 @@ pub enum TokenType {
     SharpConst,
     Vec,
     Eof,
+}
+
+impl fmt::Display for TokenType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TokenType::LParen => write!(f, "LParen"),
+            TokenType::RParen => write!(f, "RParen"),
+            TokenType::Dot => write!(f, "Dot"),
+            TokenType::Atom => write!(f, "Atom"),
+            TokenType::Quote => write!(f, "Quote"),
+            TokenType::DQuote => write!(f, "DQuote"),
+            TokenType::BQuote => write!(f, "BQuote"),
+            TokenType::Comma => write!(f, "Comma"),
+            TokenType::AtMark => write!(f, "AtMark"),
+            TokenType::Sharp => write!(f, "Sharp"),
+            TokenType::SharpConst => write!(f, "SharpConst"),
+            TokenType::Vec => write!(f, "Vec"),
+            TokenType::Eof => write!(f, "Eof"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

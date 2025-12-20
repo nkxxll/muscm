@@ -1,5 +1,5 @@
-use crate::interpreter::Interpreter;
 use crate::tokenizer::Token;
+use crate::{interpreter::Interpreter, tokenizer::TokenType};
 use anyhow::{anyhow, Result};
 
 pub trait AstNode: std::fmt::Debug {
@@ -266,13 +266,90 @@ impl Parser {
         Ok(program)
     }
 
-    pub fn is_definition(&self) -> Result<bool> {
-        // TODO: implement
-        Ok(false)
+    pub fn is_definition(self: &Self) -> Result<bool> {}
+
+    pub fn parse_definition(self: &mut Self) -> Result<Definition> {}
+    pub fn parse_expression(self: &mut Self) -> Result<Expression> {}
+
+    pub fn parse_form(self: &mut Self) -> Result<Form> {
+        // descide wether to parse definition or expression
+        pub fn is_definition(self: &Self) -> Result<bool> {
+            let peek_2 = self.peekn(2)?;
+            match peek_2[0].token_type {
+                TokenType::LParen => match peek_2[1] {
+                    Token {
+                        token_type: TokenType::Atom,
+                        literal,
+                        ..
+                    } if match literal.as_str() {
+                        "begin" => true,
+                        "define" => true,
+                        "define-syntax" => true,
+                        _ => false,
+                    } =>
+                    {
+                        Ok(true)
+                    }
+                    Token {
+                        token_type: TokenType::Atom,
+                        literal,
+                        ..
+                    } if match literal.as_str() {
+                        "let-sytnax" => true,
+                        "letrec-syntax" => true,
+                        _ => false,
+                    } =>
+                    {
+                        Err(anyhow!("let syntax and let rec syntax not supported yet"))
+                    }
+                    _ => Ok(false),
+                },
+                _ => Ok(false),
+            }
+        }
     }
 
-    pub fn parse_form(&mut self) -> Result<Box<dyn AstNode>> {
-        // decide whether to parse definition or expression
+    pub fn parse_definition(self: &mut Self) -> Result<Definition> {
+        enum DefinitionType {
+            VariableDefinition,
+            SyntaxDefinition,
+            Begin,
+        }
+        let peek_2 = self.peekn(2)?;
+        let type_ = match peek_2[0].token_type {
+            TokenType::LParen => match peek_2[1].token_type {
+                TokenType::Atom => match peek_2[1].literal.as_str() {
+                    "define" => DefinitionType::VariableDefinition,
+                    "define-syntax" => DefinitionType::SyntaxDefinition,
+                    "begin" => DefinitionType::Begin,
+                    _ => return Err(anyhow!("Unexpected token")),
+                },
+                _ => return Err(anyhow!("Unexpected token")),
+            },
+            token_type => {
+                return Err(anyhow!("Has to start with LParen is {}", token_type));
+            }
+        };
+        match type_ {
+            DefinitionType::VariableDefinition => Ok(Definition::VariableDefinition(
+                self.parse_variable_definition()?,
+            )),
+            DefinitionType::SyntaxDefinition => self.parse_syntax_definition()?,
+            DefinitionType::Begin => self.parse_begin()?,
+        }
+    }
+
+    pub fn parse_variable_definition(self: &mut Self) -> Result<VariableDefinition> {
+        // (define <variable> <expression>)
+        // (define (<variable> <variable>*) <body>)
+        // (define (<variable> <variable>* . <variable>) <body>)
+        // todo need expression for this
+    }
+
+    pub fn parse_expression(self: &mut Self) -> Result<Expression> {}
+
+    pub fn parse_form(self: &mut Self) -> Result<Form> {
+        // descide wether to parse definition or expression
         if self.is_definition()? {
             self.parse_definition()
         } else {
