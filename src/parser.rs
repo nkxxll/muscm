@@ -1,224 +1,81 @@
-use crate::tokenizer::Token;
-use crate::{interpreter::Interpreter, tokenizer::TokenType};
-use anyhow::{anyhow, Result};
+//! Simple S-expression parser for Scheme
+//! Converts tokens into an AST of nested S-expressions
 
-pub trait AstNode: std::fmt::Debug {
-    fn eval(&self, interpreter: &mut Interpreter) -> Result<Datum>;
-}
+use crate::tokenizer::{tokenize_string, Token, TokenType};
+use std::fmt;
 
-#[derive(Debug)]
-pub struct Constant {
-    pub value: ConstantValue,
-}
-
-#[derive(Debug)]
-pub enum ConstantValue {
-    Boolean(bool),
-    Number(Number),
-    Character(char),
+#[derive(Debug, Clone, PartialEq)]
+pub enum SExpr {
+    Atom(String),
+    Number(f64),
     String(String),
+    Bool(bool),
+    Char(char),
+    List(Vec<SExpr>),
+    Quote(Box<SExpr>),
+    QuasiQuote(Box<SExpr>),
+    Unquote(Box<SExpr>),
+    UnquoteSplicing(Box<SExpr>),
+    Vector(Vec<SExpr>),
 }
 
-#[derive(Debug)]
-pub struct Variable {
-    pub name: String,
+impl fmt::Display for SExpr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SExpr::Atom(s) => write!(f, "{}", s),
+            SExpr::Number(n) => {
+                if n.fract() == 0.0 {
+                    write!(f, "{}", *n as i64)
+                } else {
+                    write!(f, "{}", n)
+                }
+            }
+            SExpr::String(s) => write!(f, "\"{}\"", s),
+            SExpr::Bool(b) => write!(f, "#{}", if *b { 't' } else { 'f' }),
+            SExpr::Char(c) => write!(f, "#\\{}", c),
+            SExpr::List(items) => {
+                write!(f, "(")?;
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{}", item)?;
+                }
+                write!(f, ")")
+            }
+            SExpr::Quote(e) => write!(f, "'{}", e),
+            SExpr::QuasiQuote(e) => write!(f, "`{}", e),
+            SExpr::Unquote(e) => write!(f, ",{}", e),
+            SExpr::UnquoteSplicing(e) => write!(f, ",@{}", e),
+            SExpr::Vector(items) => {
+                write!(f, "#(")?;
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{}", item)?;
+                }
+                write!(f, ")")
+            }
+        }
+    }
 }
-
-#[derive(Debug)]
-pub struct Application {
-    pub func: Box<dyn AstNode>,
-    pub args: Vec<Box<dyn AstNode>>,
-}
-
-#[derive(Debug)]
-pub struct Lambda {
-    pub formals: Formals,
-    pub body: Vec<Box<dyn AstNode>>,
-}
-
-#[derive(Debug)]
-pub struct If {
-    pub condition: Box<dyn AstNode>,
-    pub then_expr: Box<dyn AstNode>,
-    pub else_expr: Box<dyn AstNode>,
-}
-
-#[derive(Debug)]
-pub struct If2 {
-    pub condition: Box<dyn AstNode>,
-    pub then_expr: Box<dyn AstNode>,
-}
-
-#[derive(Debug)]
-pub struct SetBang {
-    pub variable: String,
-    pub value: Box<dyn AstNode>,
-}
-
-#[derive(Debug)]
-pub struct VariableDefinition {
-    pub variable: String,
-    pub value: Box<dyn AstNode>,
-}
-
-#[derive(Debug)]
-pub struct SyntaxDefinition {
-    pub keyword: String,
-    pub transformer: Box<dyn AstNode>,
-}
-
-#[derive(Debug)]
-pub struct SyntaxBinding {
-    pub keyword: String,
-    pub transformer: Box<dyn AstNode>,
-}
-
-#[derive(Debug)]
-pub struct LetSyntax {
-    pub syntax_bindings: Vec<SyntaxBinding>,
-    pub definitions: Vec<Box<dyn AstNode>>,
-}
-
-#[derive(Debug)]
-pub struct LetrecSyntax {
-    pub syntax_bindings: Vec<SyntaxBinding>,
-    pub definitions: Vec<Box<dyn AstNode>>,
-}
-
-#[derive(Debug)]
-pub struct Begin {
-    pub expressions: Vec<Box<dyn AstNode>>,
-}
-
-#[derive(Debug)]
-pub struct And {
-    pub expressions: Vec<Box<dyn AstNode>>,
-}
-
-#[derive(Debug)]
-pub struct Or {
-    pub expressions: Vec<Box<dyn AstNode>>,
-}
-
-#[derive(Debug)]
-pub struct Cond {
-    pub clauses: Vec<CondClause>,
-}
-
-#[derive(Debug)]
-pub struct CondClause {
-    pub test: Box<dyn AstNode>,
-    pub expressions: Vec<Box<dyn AstNode>>,
-}
-
-#[derive(Debug)]
-pub struct Case {
-    pub expr: Box<dyn AstNode>,
-    pub clauses: Vec<CaseClause>,
-}
-
-#[derive(Debug)]
-pub struct CaseClause {
-    pub datums: Vec<Datum>,
-    pub expressions: Vec<Box<dyn AstNode>>,
-}
-
-#[derive(Debug)]
-pub struct Do {
-    pub iterations: Vec<DoIteration>,
-    pub test: Box<dyn AstNode>,
-    pub commands: Vec<Box<dyn AstNode>>,
-    pub body: Vec<Box<dyn AstNode>>,
-}
-
-#[derive(Debug)]
-pub struct DoIteration {
-    pub variable: String,
-    pub init: Box<dyn AstNode>,
-    pub step: Option<Box<dyn AstNode>>,
-}
-
-#[derive(Debug)]
-pub struct Let {
-    pub bindings: Vec<LetBinding>,
-    pub body: Vec<Box<dyn AstNode>>,
-}
-
-#[derive(Debug)]
-pub struct LetBinding {
-    pub variable: String,
-    pub value: Box<dyn AstNode>,
-}
-
-#[derive(Debug)]
-pub struct LetStar {
-    pub bindings: Vec<LetBinding>,
-    pub body: Vec<Box<dyn AstNode>>,
-}
-
-#[derive(Debug)]
-pub struct Letrec {
-    pub bindings: Vec<LetBinding>,
-    pub body: Vec<Box<dyn AstNode>>,
-}
-
-#[derive(Debug)]
-pub struct Quote {
-    pub datum: Datum,
-}
-
-#[derive(Debug)]
-pub struct Delay {
-    pub expr: Box<dyn AstNode>,
-}
-
-// ============ Shared Types ============
-
-#[derive(Debug, Clone)]
-pub enum Formals {
-    Variable(String),
-    List(Vec<String>),
-    DottedList { params: Vec<String>, rest: String },
-}
-
-#[derive(Debug, Clone)]
-pub enum Number {
-    Integer(i64),
-    Float(f64),
-    Rational {
-        numerator: i64,
-        denominator: i64,
-    },
-    Complex {
-        real: Box<Number>,
-        imag: Box<Number>,
-    },
-}
-
-#[derive(Debug, Clone)]
-pub enum Datum {
-    Boolean(bool),
-    Number(Number),
-    Character(char),
-    String(String),
-    Symbol(String),
-    List(Vec<Datum>),
-    DottedList {
-        elements: Vec<Datum>,
-        tail: Box<Datum>,
-    },
-    Vector(Vec<Datum>),
-    Quote(Box<Datum>),
-    QuasiQuote(Box<Datum>),
-    Unquote(Box<Datum>),
-    UnquoteSplicing(Box<Datum>),
-}
-
-pub type Program = Vec<Box<dyn AstNode>>;
 
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+}
+
+#[derive(Debug)]
+pub struct ParseError {
+    pub message: String,
+    pub line: usize,
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Parse error at line {}: {}", self.line, self.message)
+    }
 }
 
 impl Parser {
@@ -226,189 +83,398 @@ impl Parser {
         Parser { tokens, pos: 0 }
     }
 
-    pub fn peek(&self) -> &Token {
-        &self.tokens[self.pos]
+    fn peek(&self) -> Option<&Token> {
+        self.tokens.get(self.pos)
     }
 
-    pub fn peekn(&self, n: usize) -> Result<Vec<&Token>> {
-        let mut res = Vec::new();
-        for i in self.pos..self.pos + n {
-            if i < self.tokens.len() {
-                res.push(&self.tokens[i]);
-            } else {
-                return Err(anyhow!("Peeked too far"));
+    fn consume(&mut self) -> Option<Token> {
+        if self.pos < self.tokens.len() {
+            let token = self.tokens[self.pos].clone();
+            self.pos += 1;
+            Some(token)
+        } else {
+            None
+        }
+    }
+
+    fn current_line(&self) -> usize {
+        self.peek().map(|t| t.line).unwrap_or(0)
+    }
+
+    fn error(&self, message: &str) -> ParseError {
+        ParseError {
+            message: message.to_string(),
+            line: self.current_line(),
+        }
+    }
+
+    fn parse_string(&mut self) -> Result<SExpr, ParseError> {
+        // Opening quote already consumed
+        let mut content = String::new();
+        let mut first = true;
+
+        loop {
+            match self.peek() {
+                Some(Token {
+                    token_type: TokenType::DQuote,
+                    ..
+                }) => {
+                    self.consume();
+                    return Ok(SExpr::String(content));
+                }
+                Some(token) => {
+                    if !first {
+                        content.push(' ');
+                    }
+                    content.push_str(&token.literal);
+                    self.consume();
+                    first = false;
+                }
+                None => return Err(self.error("Unterminated string")),
             }
         }
-        Ok(res)
     }
 
-    pub fn advance(&mut self) -> &Token {
-        assert!(self.pos < self.tokens.len());
-        let token = &self.tokens[self.pos];
-        self.pos += 1;
-        token
-    }
+    fn parse_list(&mut self) -> Result<SExpr, ParseError> {
+        // Opening paren already consumed
+        let mut items = Vec::new();
 
-    pub fn parse(&mut self) -> Result<Program> {
-        self.parse_program()
-    }
-
-    pub fn parse_program(&mut self) -> Result<Program> {
-        let mut program: Program = Vec::new();
         loop {
-            match self.peek().token_type {
-                crate::tokenizer::TokenType::Eof => break,
+            match self.peek() {
+                Some(Token {
+                    token_type: TokenType::RParen,
+                    ..
+                }) => {
+                    self.consume();
+                    return Ok(SExpr::List(items));
+                }
+                Some(Token {
+                    token_type: TokenType::Dot,
+                    ..
+                }) => {
+                    // Improper list (a . b)
+                    if items.is_empty() {
+                        return Err(self.error("Unexpected dot"));
+                    }
+                    self.consume();
+                    let cdr = self.parse_expr()?;
+
+                    // Convert (a . b) to (a . b) by creating improper list
+                    match self.peek() {
+                        Some(Token {
+                            token_type: TokenType::RParen,
+                            ..
+                        }) => {
+                            self.consume();
+                            // Build improper list
+                            items.push(cdr);
+                            return Ok(SExpr::List(items));
+                        }
+                        _ => return Err(self.error("Expected ) after dot notation")),
+                    }
+                }
                 _ => {
-                    program.push(self.parse_form()?);
+                    items.push(self.parse_expr()?);
                 }
             }
         }
-        Ok(program)
     }
 
-    pub fn is_definition(self: &Self) -> Result<bool> {}
+    fn parse_vector(&mut self) -> Result<SExpr, ParseError> {
+        // #( already consumed
+        let mut items = Vec::new();
 
-    pub fn parse_definition(self: &mut Self) -> Result<Definition> {}
-    pub fn parse_expression(self: &mut Self) -> Result<Expression> {}
-
-    pub fn parse_form(self: &mut Self) -> Result<Form> {
-        // descide wether to parse definition or expression
-        pub fn is_definition(self: &Self) -> Result<bool> {
-            let peek_2 = self.peekn(2)?;
-            match peek_2[0].token_type {
-                TokenType::LParen => match peek_2[1] {
-                    Token {
-                        token_type: TokenType::Atom,
-                        literal,
-                        ..
-                    } if match literal.as_str() {
-                        "begin" => true,
-                        "define" => true,
-                        "define-syntax" => true,
-                        _ => false,
-                    } =>
-                    {
-                        Ok(true)
-                    }
-                    Token {
-                        token_type: TokenType::Atom,
-                        literal,
-                        ..
-                    } if match literal.as_str() {
-                        "let-sytnax" => true,
-                        "letrec-syntax" => true,
-                        _ => false,
-                    } =>
-                    {
-                        Err(anyhow!("let syntax and let rec syntax not supported yet"))
-                    }
-                    _ => Ok(false),
-                },
-                _ => Ok(false),
+        loop {
+            match self.peek() {
+                Some(Token {
+                    token_type: TokenType::RParen,
+                    ..
+                }) => {
+                    self.consume();
+                    return Ok(SExpr::Vector(items));
+                }
+                _ => {
+                    items.push(self.parse_expr()?);
+                }
             }
         }
     }
 
-    pub fn parse_definition(self: &mut Self) -> Result<Definition> {
-        enum DefinitionType {
-            VariableDefinition,
-            SyntaxDefinition,
-            Begin,
-        }
-        let peek_2 = self.peekn(2)?;
-        let type_ = match peek_2[0].token_type {
-            TokenType::LParen => match peek_2[1].token_type {
-                TokenType::Atom => match peek_2[1].literal.as_str() {
-                    "define" => DefinitionType::VariableDefinition,
-                    "define-syntax" => DefinitionType::SyntaxDefinition,
-                    "begin" => DefinitionType::Begin,
-                    _ => return Err(anyhow!("Unexpected token")),
-                },
-                _ => return Err(anyhow!("Unexpected token")),
-            },
-            token_type => {
-                return Err(anyhow!("Has to start with LParen is {}", token_type));
+    fn parse_sharp_const(&self, literal: &str) -> Result<SExpr, ParseError> {
+        match literal {
+            "#t" => Ok(SExpr::Bool(true)),
+            "#f" => Ok(SExpr::Bool(false)),
+            s if s.starts_with("#\\") => {
+                let char_part = &s[2..];
+                let c = match char_part {
+                    "space" => ' ',
+                    "newline" => '\n',
+                    "tab" => '\t',
+                    "return" => '\r',
+                    s if s.len() == 1 => s.chars().next().unwrap(),
+                    _ => return Err(self.error(&format!("Unknown character literal: {}", s))),
+                };
+                Ok(SExpr::Char(c))
             }
-        };
-        match type_ {
-            DefinitionType::VariableDefinition => Ok(Definition::VariableDefinition(
-                self.parse_variable_definition()?,
-            )),
-            DefinitionType::SyntaxDefinition => self.parse_syntax_definition()?,
-            DefinitionType::Begin => self.parse_begin()?,
+            _ => Err(self.error(&format!("Unknown sharp constant: {}", literal))),
         }
     }
 
-    pub fn parse_variable_definition(self: &mut Self) -> Result<VariableDefinition> {
-        // (define <variable> <expression>)
-        // (define (<variable> <variable>*) <body>)
-        // (define (<variable> <variable>* . <variable>) <body>)
-        // todo need expression for this
+    fn parse_atom(&self, literal: &str) -> Result<SExpr, ParseError> {
+        // Try to parse as number
+        if let Ok(n) = literal.parse::<f64>() {
+            return Ok(SExpr::Number(n));
+        }
+
+        // Otherwise it's an atom
+        Ok(SExpr::Atom(literal.to_string()))
     }
 
-    pub fn parse_expression(self: &mut Self) -> Result<Expression> {}
+    fn parse_expr(&mut self) -> Result<SExpr, ParseError> {
+        match self.consume() {
+            Some(Token {
+                token_type: TokenType::LParen,
+                ..
+            }) => self.parse_list(),
 
-    pub fn parse_form(self: &mut Self) -> Result<Form> {
-        // descide wether to parse definition or expression
-        if self.is_definition()? {
-            self.parse_definition()
-        } else {
-            self.parse_expression()
+            Some(Token {
+                token_type: TokenType::DQuote,
+                ..
+            }) => self.parse_string(),
+
+            Some(Token {
+                token_type: TokenType::Quote,
+                ..
+            }) => {
+                let expr = self.parse_expr()?;
+                Ok(SExpr::Quote(Box::new(expr)))
+            }
+
+            Some(Token {
+                token_type: TokenType::BQuote,
+                ..
+            }) => {
+                let expr = self.parse_expr()?;
+                Ok(SExpr::QuasiQuote(Box::new(expr)))
+            }
+
+            Some(Token {
+                token_type: TokenType::Comma,
+                ..
+            }) => {
+                let expr = self.parse_expr()?;
+                Ok(SExpr::Unquote(Box::new(expr)))
+            }
+
+            Some(Token {
+                token_type: TokenType::AtMark,
+                ..
+            }) => {
+                let expr = self.parse_expr()?;
+                Ok(SExpr::UnquoteSplicing(Box::new(expr)))
+            }
+
+            Some(Token {
+                token_type: TokenType::Vec,
+                ..
+            }) => self.parse_vector(),
+
+            Some(Token {
+                token_type: TokenType::Atom,
+                literal,
+                ..
+            }) => self.parse_atom(&literal),
+
+            Some(Token {
+                token_type: TokenType::SharpConst,
+                literal,
+                ..
+            }) => self.parse_sharp_const(&literal),
+
+            Some(Token {
+                token_type: TokenType::Eof,
+                ..
+            }) => Err(self.error("Unexpected EOF")),
+
+            _ => Err(self.error("Unexpected token")),
         }
     }
 
-    pub fn parse_definition(&mut self) -> Result<Box<dyn AstNode>> {
-        // TODO: implement
-        Err(anyhow!("parse_definition not implemented"))
-    }
+    pub fn parse(&mut self) -> Result<Vec<SExpr>, ParseError> {
+        let mut exprs = Vec::new();
 
-    pub fn parse_expression(&mut self) -> Result<Box<dyn AstNode>> {
-        // TODO: implement
-        Err(anyhow!("parse_expression not implemented"))
-    }
-}
+        loop {
+            match self.peek() {
+                Some(Token {
+                    token_type: TokenType::Eof,
+                    ..
+                }) => break,
+                None => break,
+                _ => {
+                    exprs.push(self.parse_expr()?);
+                }
+            }
+        }
 
-impl AstNode for Constant {
-    fn eval(&self, _interpreter: &mut crate::interpreter::Interpreter) -> Result<Datum> {
-        // TODO: implement
-        Err(anyhow!("Constant::eval not implemented"))
-    }
-}
-
-impl AstNode for Variable {
-    fn eval(&self, _interpreter: &mut crate::interpreter::Interpreter) -> Result<Datum> {
-        // TODO: implement
-        Err(anyhow!("Variable::eval not implemented"))
+        Ok(exprs)
     }
 }
 
-impl AstNode for Application {
-    fn eval(&self, _interpreter: &mut crate::interpreter::Interpreter) -> Result<Datum> {
-        // Now you can just call eval recursively:
-        // let func_val = self.func.eval(interpreter)?;
-        // let arg_vals: Result<Vec<_>> = self.args.iter().map(|arg| arg.eval(interpreter)).collect();
-        // TODO: implement
-        Err(anyhow!("Application::eval not implemented"))
-    }
+pub fn parse(input: &str) -> Result<Vec<SExpr>, ParseError> {
+    let tokens = tokenize_string(input);
+    let mut parser = Parser::new(tokens);
+    parser.parse()
 }
 
-impl AstNode for Lambda {
-    fn eval(&self, _interpreter: &mut crate::interpreter::Interpreter) -> Result<Datum> {
-        // TODO: implement
-        Err(anyhow!("Lambda::eval not implemented"))
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-impl AstNode for If {
-    fn eval(&self, _interpreter: &mut crate::interpreter::Interpreter) -> Result<Datum> {
-        // TODO: implement
-        Err(anyhow!("If::eval not implemented"))
+    #[test]
+    fn test_parse_simple_list() {
+        let result = parse("(+ 1 2)").unwrap();
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            SExpr::List(items) => {
+                assert_eq!(items.len(), 3);
+                assert_eq!(items[1], SExpr::Number(1.0));
+                assert_eq!(items[2], SExpr::Number(2.0));
+            }
+            _ => panic!("Expected list"),
+        }
     }
-}
 
-impl AstNode for VariableDefinition {
-    fn eval(&self, _interpreter: &mut crate::interpreter::Interpreter) -> Result<Datum> {
-        // TODO: implement
-        Err(anyhow!("VariableDefinition::eval not implemented"))
+    #[test]
+    fn test_parse_atom() {
+        let result = parse("hello").unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], SExpr::Atom("hello".to_string()));
+    }
+
+    #[test]
+    fn test_parse_number() {
+        let result = parse("42").unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], SExpr::Number(42.0));
+    }
+
+    #[test]
+    fn test_parse_quote() {
+        let result = parse("'hello").unwrap();
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            SExpr::Quote(e) => {
+                assert_eq!(**e, SExpr::Atom("hello".to_string()));
+            }
+            _ => panic!("Expected quote"),
+        }
+    }
+
+    #[test]
+    fn test_parse_bool() {
+        let result = parse("#t #f").unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], SExpr::Bool(true));
+        assert_eq!(result[1], SExpr::Bool(false));
+    }
+
+    #[test]
+    fn test_parse_string() {
+        let result = parse("\"hello world\"").unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], SExpr::String("hello world".to_string()));
+    }
+
+    #[test]
+    fn test_parse_nested_list() {
+        let result = parse("(define (square x) (* x x))").unwrap();
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            SExpr::List(items) => {
+                assert_eq!(items.len(), 3);
+                assert_eq!(items[0], SExpr::Atom("define".to_string()));
+            }
+            _ => panic!("Expected list"),
+        }
+    }
+
+    #[test]
+    fn test_parse_vector() {
+        let result = parse("#(1 2 3)").unwrap();
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            SExpr::Vector(items) => {
+                assert_eq!(items.len(), 3);
+            }
+            _ => panic!("Expected vector"),
+        }
+    }
+
+    #[test]
+    fn test_parse_multiple_exprs() {
+        let result = parse("42 hello (+ 1 2)").unwrap();
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0], SExpr::Number(42.0));
+        assert_eq!(result[1], SExpr::Atom("hello".to_string()));
+    }
+
+    #[test]
+    fn test_parse_backquote() {
+        let result = parse("`(a ,b)").unwrap();
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            SExpr::QuasiQuote(_) => {}
+            _ => panic!("Expected quasi-quote"),
+        }
+    }
+
+    #[test]
+    fn test_parse_unquote_splicing() {
+        let result = parse("(,@items)").unwrap();
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            SExpr::List(items) => {
+                assert_eq!(items.len(), 1);
+                match &items[0] {
+                    SExpr::UnquoteSplicing(_) => {}
+                    _ => panic!("Expected unquote-splicing"),
+                }
+            }
+            _ => panic!("Expected list"),
+        }
+    }
+
+    #[test]
+    fn test_parse_scheme_read_file() {
+        let input = r#"(define (print-file filename)
+          (call-with-input-file filename
+            (lambda (port)
+              (let loop ()
+                (let ((line (read-line port)))
+                  (if (eof-object? line)
+                      'done
+                      (begin
+                        (display line)
+                        (newline)
+                        (loop))))))))
+
+        ;; Example usage
+        (print-file "example.txt")"#;
+        let result = parse(input).unwrap();
+        assert_eq!(result.len(), 2);
+        // First expression is (define (print-file filename) ...)
+        match &result[0] {
+            SExpr::List(items) => {
+                assert_eq!(items[0], SExpr::Atom("define".to_string()));
+            }
+            _ => panic!("Expected first expression to be a list"),
+        }
+        // Second expression is (print-file "example.txt")
+        match &result[1] {
+            SExpr::List(items) => {
+                assert_eq!(items[0], SExpr::Atom("print-file".to_string()));
+            }
+            _ => panic!("Expected second expression to be a list"),
+        }
     }
 }
