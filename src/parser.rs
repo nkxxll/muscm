@@ -1,174 +1,201 @@
+use crate::interpreter::Interpreter;
 use crate::tokenizer::Token;
 use anyhow::{anyhow, Result};
 
-// Program: sequence of forms
-pub type Program = Vec<Form>;
-
-pub enum Form {
-    Definition(Definition),
-    Expression(Expression),
+pub trait AstNode: std::fmt::Debug {
+    fn eval(&self, interpreter: &mut Interpreter) -> Result<Datum>;
 }
 
-// Definitions
-pub enum Definition {
-    VariableDefinition(VariableDefinition),
-    SyntaxDefinition(SyntaxDefinition),
-    Begin(Vec<Definition>),
-    LetSyntax(LetSyntax),
-    LetrecSyntax(LetrecSyntax),
+#[derive(Debug)]
+pub struct Constant {
+    pub value: ConstantValue,
 }
 
-pub struct VariableDefinition {
-    pub variable: String, // identifier
-    pub value: Expression,
-}
-
-pub struct FunctionDefinition {
-    pub name: String,
-    pub params: Formals,
-    pub body: Body,
-}
-
-pub struct SyntaxDefinition {
-    pub keyword: String, // identifier
-    pub transformer: Expression,
-}
-
-pub struct SyntaxBinding {
-    pub keyword: String, // identifier
-    pub transformer: Expression,
-}
-
-pub struct LetSyntax {
-    pub syntax_bindings: Vec<SyntaxBinding>,
-    pub definitions: Vec<Definition>,
-}
-
-pub struct LetrecSyntax {
-    pub syntax_bindings: Vec<SyntaxBinding>,
-    pub definitions: Vec<Definition>,
-}
-
-pub struct Body {
-    pub definitions: Vec<Definition>,
-    pub expressions: Vec<Expression>,
-}
-
-// Expressions
-pub enum Expression {
-    Constant(Constant),
-    Variable(String),
-    Quote(Datum),
-    QuasiQuote(Datum),
-    Unquote(Datum),
-    UnquoteSplicing(Datum),
-    Lambda(Lambda),
-    If(If),
-    If2(If2),
-    SetBang(SetBang),
-    Application(Application),
-    LetSyntax(LetSyntax),
-    LetrecSyntax(LetrecSyntax),
-    Begin(Vec<Expression>),
-    And(Vec<Expression>),
-    Or(Vec<Expression>),
-    Cond(Vec<CondClause>),
-    Case(Case),
-    Delay(Box<Expression>),
-    Do(Do),
-    Let(Let),
-    LetStar(LetStar),
-    Letrec(Letrec),
-}
-
-pub enum Constant {
+#[derive(Debug)]
+pub enum ConstantValue {
     Boolean(bool),
     Number(Number),
     Character(char),
     String(String),
 }
 
+#[derive(Debug)]
+pub struct Variable {
+    pub name: String,
+}
+
+#[derive(Debug)]
+pub struct Application {
+    pub func: Box<dyn AstNode>,
+    pub args: Vec<Box<dyn AstNode>>,
+}
+
+#[derive(Debug)]
 pub struct Lambda {
     pub formals: Formals,
-    pub body: Body,
+    pub body: Vec<Box<dyn AstNode>>,
 }
 
+#[derive(Debug)]
 pub struct If {
-    pub condition: Box<Expression>,
-    pub then_expr: Box<Expression>,
-    pub else_expr: Box<Expression>,
+    pub condition: Box<dyn AstNode>,
+    pub then_expr: Box<dyn AstNode>,
+    pub else_expr: Box<dyn AstNode>,
 }
 
+#[derive(Debug)]
 pub struct If2 {
-    pub condition: Box<Expression>,
-    pub then_expr: Box<Expression>,
+    pub condition: Box<dyn AstNode>,
+    pub then_expr: Box<dyn AstNode>,
 }
 
+#[derive(Debug)]
 pub struct SetBang {
     pub variable: String,
-    pub value: Box<Expression>,
+    pub value: Box<dyn AstNode>,
 }
 
-pub struct Application {
-    pub func: Box<Expression>,
-    pub args: Vec<Expression>,
+#[derive(Debug)]
+pub struct VariableDefinition {
+    pub variable: String,
+    pub value: Box<dyn AstNode>,
 }
 
+#[derive(Debug)]
+pub struct SyntaxDefinition {
+    pub keyword: String,
+    pub transformer: Box<dyn AstNode>,
+}
+
+#[derive(Debug)]
+pub struct SyntaxBinding {
+    pub keyword: String,
+    pub transformer: Box<dyn AstNode>,
+}
+
+#[derive(Debug)]
+pub struct LetSyntax {
+    pub syntax_bindings: Vec<SyntaxBinding>,
+    pub definitions: Vec<Box<dyn AstNode>>,
+}
+
+#[derive(Debug)]
+pub struct LetrecSyntax {
+    pub syntax_bindings: Vec<SyntaxBinding>,
+    pub definitions: Vec<Box<dyn AstNode>>,
+}
+
+#[derive(Debug)]
+pub struct Begin {
+    pub expressions: Vec<Box<dyn AstNode>>,
+}
+
+#[derive(Debug)]
+pub struct And {
+    pub expressions: Vec<Box<dyn AstNode>>,
+}
+
+#[derive(Debug)]
+pub struct Or {
+    pub expressions: Vec<Box<dyn AstNode>>,
+}
+
+#[derive(Debug)]
+pub struct Cond {
+    pub clauses: Vec<CondClause>,
+}
+
+#[derive(Debug)]
+pub struct CondClause {
+    pub test: Box<dyn AstNode>,
+    pub expressions: Vec<Box<dyn AstNode>>,
+}
+
+#[derive(Debug)]
+pub struct Case {
+    pub expr: Box<dyn AstNode>,
+    pub clauses: Vec<CaseClause>,
+}
+
+#[derive(Debug)]
+pub struct CaseClause {
+    pub datums: Vec<Datum>,
+    pub expressions: Vec<Box<dyn AstNode>>,
+}
+
+#[derive(Debug)]
+pub struct Do {
+    pub iterations: Vec<DoIteration>,
+    pub test: Box<dyn AstNode>,
+    pub commands: Vec<Box<dyn AstNode>>,
+    pub body: Vec<Box<dyn AstNode>>,
+}
+
+#[derive(Debug)]
+pub struct DoIteration {
+    pub variable: String,
+    pub init: Box<dyn AstNode>,
+    pub step: Option<Box<dyn AstNode>>,
+}
+
+#[derive(Debug)]
+pub struct Let {
+    pub bindings: Vec<LetBinding>,
+    pub body: Vec<Box<dyn AstNode>>,
+}
+
+#[derive(Debug)]
+pub struct LetBinding {
+    pub variable: String,
+    pub value: Box<dyn AstNode>,
+}
+
+#[derive(Debug)]
+pub struct LetStar {
+    pub bindings: Vec<LetBinding>,
+    pub body: Vec<Box<dyn AstNode>>,
+}
+
+#[derive(Debug)]
+pub struct Letrec {
+    pub bindings: Vec<LetBinding>,
+    pub body: Vec<Box<dyn AstNode>>,
+}
+
+#[derive(Debug)]
+pub struct Quote {
+    pub datum: Datum,
+}
+
+#[derive(Debug)]
+pub struct Delay {
+    pub expr: Box<dyn AstNode>,
+}
+
+// ============ Shared Types ============
+
+#[derive(Debug, Clone)]
 pub enum Formals {
     Variable(String),
     List(Vec<String>),
     DottedList { params: Vec<String>, rest: String },
 }
 
-pub struct CondClause {
-    pub test: Box<Expression>,
-    pub expressions: Vec<Expression>,
+#[derive(Debug, Clone)]
+pub enum Number {
+    Integer(i64),
+    Float(f64),
+    Rational {
+        numerator: i64,
+        denominator: i64,
+    },
+    Complex {
+        real: Box<Number>,
+        imag: Box<Number>,
+    },
 }
 
-pub struct Case {
-    pub expr: Box<Expression>,
-    pub clauses: Vec<CaseClause>,
-}
-
-pub struct CaseClause {
-    pub datums: Vec<Datum>,
-    pub expressions: Vec<Expression>,
-}
-
-pub struct Do {
-    pub iterations: Vec<DoIteration>,
-    pub test: Box<Expression>,
-    pub commands: Vec<Expression>,
-    pub body: Vec<Expression>,
-}
-
-pub struct DoIteration {
-    pub variable: String,
-    pub init: Box<Expression>,
-    pub step: Option<Box<Expression>>,
-}
-
-pub struct Let {
-    pub bindings: Vec<LetBinding>,
-    pub body: Body,
-}
-
-pub struct LetBinding {
-    pub variable: String,
-    pub value: Box<Expression>,
-}
-
-pub struct LetStar {
-    pub bindings: Vec<LetBinding>,
-    pub body: Body,
-}
-
-pub struct Letrec {
-    pub bindings: Vec<LetBinding>,
-    pub body: Body,
-}
-
-// Data
+#[derive(Debug, Clone)]
 pub enum Datum {
     Boolean(bool),
     Number(Number),
@@ -187,18 +214,7 @@ pub enum Datum {
     UnquoteSplicing(Box<Datum>),
 }
 
-pub enum Number {
-    Integer(i64),
-    Float(f64),
-    Rational {
-        numerator: i64,
-        denominator: i64,
-    },
-    Complex {
-        real: Box<Number>,
-        imag: Box<Number>,
-    },
-}
+pub type Program = Vec<Box<dyn AstNode>>;
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -210,11 +226,11 @@ impl Parser {
         Parser { tokens, pos: 0 }
     }
 
-    pub fn peek(self: &Self) -> &Token {
-        &self.tokens[self.pos + 1]
+    pub fn peek(&self) -> &Token {
+        &self.tokens[self.pos]
     }
 
-    pub fn peekn(self: &Self, n: usize) -> Result<Vec<&Token>> {
+    pub fn peekn(&self, n: usize) -> Result<Vec<&Token>> {
         let mut res = Vec::new();
         for i in self.pos..self.pos + n {
             if i < self.tokens.len() {
@@ -226,42 +242,96 @@ impl Parser {
         Ok(res)
     }
 
-    pub fn advance(self: &mut Self) -> &Token {
-        assert!(self.pos + 1 < self.tokens.len());
+    pub fn advance(&mut self) -> &Token {
+        assert!(self.pos < self.tokens.len());
+        let token = &self.tokens[self.pos];
         self.pos += 1;
-        &self.tokens[self.pos]
+        token
     }
 
-    pub fn parse(self: &mut Self) -> Result<Program> {
+    pub fn parse(&mut self) -> Result<Program> {
         self.parse_program()
     }
 
-    pub fn parse_program(self: &mut Self) -> Result<Program> {
-        // parse one or more form
-        let mut program: Vec<Form> = Vec::new();
+    pub fn parse_program(&mut self) -> Result<Program> {
+        let mut program: Program = Vec::new();
         loop {
             match self.peek().token_type {
                 crate::tokenizer::TokenType::Eof => break,
-                _ => {}
+                _ => {
+                    program.push(self.parse_form()?);
+                }
             }
-            program.push(self.parse_form()?);
         }
         Ok(program)
     }
 
-    pub fn is_definition(self: &Self) -> Result<bool> {}
+    pub fn is_definition(&self) -> Result<bool> {
+        // TODO: implement
+        Ok(false)
+    }
 
-    pub fn parse_definition(self: &mut Self) -> Result<Definition> {}
-    pub fn parse_expression(self: &mut Self) -> Result<Expression> {}
-
-    pub fn parse_form(self: &mut Self) -> Result<Form> {
-        // descide wether to parse definition or expression
+    pub fn parse_form(&mut self) -> Result<Box<dyn AstNode>> {
+        // decide whether to parse definition or expression
         if self.is_definition()? {
-            Ok(Form::Definition(self.parse_definition()?))
+            self.parse_definition()
         } else {
-            Ok(Form::Expression(self.parse_expression()?))
+            self.parse_expression()
         }
+    }
+
+    pub fn parse_definition(&mut self) -> Result<Box<dyn AstNode>> {
+        // TODO: implement
+        Err(anyhow!("parse_definition not implemented"))
+    }
+
+    pub fn parse_expression(&mut self) -> Result<Box<dyn AstNode>> {
+        // TODO: implement
+        Err(anyhow!("parse_expression not implemented"))
     }
 }
 
-pub fn parse_tokens_to_ast() {}
+impl AstNode for Constant {
+    fn eval(&self, _interpreter: &mut crate::interpreter::Interpreter) -> Result<Datum> {
+        // TODO: implement
+        Err(anyhow!("Constant::eval not implemented"))
+    }
+}
+
+impl AstNode for Variable {
+    fn eval(&self, _interpreter: &mut crate::interpreter::Interpreter) -> Result<Datum> {
+        // TODO: implement
+        Err(anyhow!("Variable::eval not implemented"))
+    }
+}
+
+impl AstNode for Application {
+    fn eval(&self, _interpreter: &mut crate::interpreter::Interpreter) -> Result<Datum> {
+        // Now you can just call eval recursively:
+        // let func_val = self.func.eval(interpreter)?;
+        // let arg_vals: Result<Vec<_>> = self.args.iter().map(|arg| arg.eval(interpreter)).collect();
+        // TODO: implement
+        Err(anyhow!("Application::eval not implemented"))
+    }
+}
+
+impl AstNode for Lambda {
+    fn eval(&self, _interpreter: &mut crate::interpreter::Interpreter) -> Result<Datum> {
+        // TODO: implement
+        Err(anyhow!("Lambda::eval not implemented"))
+    }
+}
+
+impl AstNode for If {
+    fn eval(&self, _interpreter: &mut crate::interpreter::Interpreter) -> Result<Datum> {
+        // TODO: implement
+        Err(anyhow!("If::eval not implemented"))
+    }
+}
+
+impl AstNode for VariableDefinition {
+    fn eval(&self, _interpreter: &mut crate::interpreter::Interpreter) -> Result<Datum> {
+        // TODO: implement
+        Err(anyhow!("VariableDefinition::eval not implemented"))
+    }
+}
