@@ -54,6 +54,8 @@ impl Parser {
 
     fn parse_string(&mut self) -> Result<SExpr, ParseError> {
         // Opening quote already consumed
+        // todo: this is not good string parsing because white space is thrown
+        // this is because the tokenizer should have token string
         let mut content = String::new();
         let mut first = true;
 
