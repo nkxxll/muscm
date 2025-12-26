@@ -67,9 +67,10 @@
 use phf::phf_map;
 
 use nom::{
+    branch::alt,
     bytes::complete::{tag, take_while, take_while1},
     character::complete::{char, digit1, satisfy},
-    combinator::{opt, recognize},
+    combinator::{map, opt, recognize},
     multi::many0,
     sequence::{pair, preceded},
     IResult, Input, Needed, Parser,
@@ -136,7 +137,7 @@ pub enum Token {
     // Values
     Identifier(::std::string::String),
     Number(::std::string::String),
-    String(::std::string::String),
+    StringLit(::std::string::String),
 }
 use Token::*;
 
@@ -175,7 +176,7 @@ impl<'a> Input for TokenSlice<'a> {
     where
         P: Fn(Self::Item) -> bool,
     {
-        self.0.iter().position(|item| predicate(item))
+        self.0.iter().position(predicate)
     }
 
     fn iter_elements(&self) -> Self::Iter {
@@ -188,7 +189,9 @@ impl<'a> Input for TokenSlice<'a> {
 
     fn slice_index(&self, count: usize) -> Result<usize, Needed> {
         if count > self.0.len() {
-            Err(Needed::Size(std::num::NonZeroUsize::new(count - self.0.len()).unwrap()))
+            Err(Needed::Size(
+                std::num::NonZeroUsize::new(count - self.0.len()).unwrap(),
+            ))
         } else {
             Ok(count)
         }
@@ -303,7 +306,7 @@ fn token(input: &str) -> IResult<&str, Token> {
         return Ok((rest, token));
     }
     if let Ok((rest, content)) = string_literal(input) {
-        return Ok((rest, Token::String(content)));
+        return Ok((rest, Token::StringLit(content)));
     }
     if let Ok((rest, num)) = number(input) {
         return Ok((rest, Token::Number(num.to_string())));
@@ -350,35 +353,409 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ::std::string::String> {
     Ok(tokens)
 }
 
-struct Block {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Block {
     statements: Vec<Statement>,
     return_statement: Option<ReturnStatement>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Statement {}
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ReturnStatement {
     expression_list: Vec<Expression>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Expression {
+    Nil,
+    Boolean(bool),
+    Number(String),
+    String(String),
+    Varargs,
+    Identifier(String),
+    BinaryOp {
+        left: Box<Expression>,
+        op: BinaryOp,
+        right: Box<Expression>,
+    },
+    UnaryOp {
+        op: UnaryOp,
+        operand: Box<Expression>,
+    },
 }
 
-fn parse_statement(t: TokenSlice) -> IResult<TokenSlice, Statement> {
-    Err(nom::Err::Error(nom::error::Error::new(t, nom::error::ErrorKind::Tag)))
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BinaryOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    FloorDivide,
+    Modulo,
+    Power,
+    Concat,
+    BitAnd,
+    BitOr,
+    BitXor,
+    LeftShift,
+    RightShift,
+    Lt,
+    Lte,
+    Gt,
+    Gte,
+    Eq,
+    Neq,
+    And,
+    Or,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum UnaryOp {
+    Minus,
+    Not,
+    BitNot,
+    Length,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Field {
+    key: FieldKey,
+    value: Expression,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FieldKey {
+    Bracket(Box<Expression>),
+    Identifier(String),
+    Index(usize),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FunctionBody {
+    params: Vec<String>,
+    varargs: bool,
+    block: Box<Block>,
+}
+
+fn parse_statement(t: TokenSlice) -> IResult<TokenSlice, Statement> {}
+
+fn parse_number_literal(t: TokenSlice) -> IResult<TokenSlice, Expression> {
+    if let Some(Token::Number(n)) = t.0.first() {
+        Ok((TokenSlice(&t.0[1..]), Expression::Number(n.clone())))
+    } else {
+        Err(nom::Err::Error(nom::error::Error::new(
+            t,
+            nom::error::ErrorKind::Tag,
+        )))
+    }
+}
+
+fn parse_string_literal(t: TokenSlice) -> IResult<TokenSlice, Expression> {
+    if let Some(Token::StringLit(s)) = t.0.first() {
+        Ok((TokenSlice(&t.0[1..]), Expression::String(s.clone())))
+    } else {
+        Err(nom::Err::Error(nom::error::Error::new(
+            t,
+            nom::error::ErrorKind::Tag,
+        )))
+    }
+}
+
+fn parse_identifier(t: TokenSlice) -> IResult<TokenSlice, Expression> {
+    if let Some(Token::Identifier(id)) = t.0.first() {
+        Ok((TokenSlice(&t.0[1..]), Expression::Identifier(id.clone())))
+    } else {
+        Err(nom::Err::Error(nom::error::Error::new(
+            t,
+            nom::error::ErrorKind::Tag,
+        )))
+    }
+}
+
+/// Parse a simple literal: nil | false | true | number | string | ...
+fn parse_literal(t: TokenSlice) -> IResult<TokenSlice, Expression> {
+    alt((
+        map(token_tag(&Token::Nil), |_| Expression::Nil),
+        map(token_tag(&Token::True), |_| Expression::Boolean(true)),
+        map(token_tag(&Token::False), |_| Expression::Boolean(false)),
+        map(token_tag(&Token::Varargs), |_| Expression::Varargs),
+        parse_number_literal,
+        parse_string_literal,
+        parse_identifier,
+    ))
+    .parse(t)
+}
+
+/// Parse unary operators: - | not | # | ~
+fn parse_unary_op(t: TokenSlice) -> IResult<TokenSlice, UnaryOp> {
+    alt((
+        map(token_tag(&Token::Minus), |_| UnaryOp::Minus),
+        map(token_tag(&Token::Not), |_| UnaryOp::Not),
+        map(token_tag(&Token::Hash), |_| UnaryOp::Length),
+        map(token_tag(&Token::Tilde), |_| UnaryOp::BitNot),
+    ))
+    .parse(t)
+}
+
+/// Parse a unary expression
+fn parse_unary_expr(t: TokenSlice) -> IResult<TokenSlice, Expression> {
+    alt((
+        map(pair(parse_unary_op, parse_unary_expr), |(op, operand)| {
+            Expression::UnaryOp {
+                op,
+                operand: Box::new(operand),
+            }
+        }),
+        parse_literal,
+    ))
+    .parse(t)
+}
+
+/// Parse expression with binary operators
+/// Lua operator precedence (lowest to highest):
+/// or, and, <, >, <=, >=, ~=, ==, |, ~, &, <<, >>, .., +, -, *, /, //, %, ^, unary
+fn parse_or_expr(t: TokenSlice) -> IResult<TokenSlice, Expression> {
+    let (rest, mut left) = parse_and_expr(t)?;
+    let (rest, ops) = many0(pair(
+        |i| token_tag(&Token::Or)(i).map(|(r, _)| (r, BinaryOp::Or)),
+        parse_and_expr,
+    ))
+    .parse(rest)?;
+    for (op, right) in ops {
+        left = Expression::BinaryOp {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        };
+    }
+    Ok((rest, left))
+}
+
+fn parse_and_expr(t: TokenSlice) -> IResult<TokenSlice, Expression> {
+    let (rest, mut left) = parse_eq_expr(t)?;
+    let (rest, ops) = many0(pair(
+        |i| token_tag(&Token::And)(i).map(|(r, _)| (r, BinaryOp::And)),
+        parse_eq_expr,
+    ))
+    .parse(rest)?;
+    for (op, right) in ops {
+        left = Expression::BinaryOp {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        };
+    }
+    Ok((rest, left))
+}
+
+fn parse_eq_expr(t: TokenSlice) -> IResult<TokenSlice, Expression> {
+    let (rest, mut left) = parse_relational_expr(t)?;
+    let (rest, ops) = many0(pair(parse_eq_op, parse_relational_expr)).parse(rest)?;
+    for (op, right) in ops {
+        left = Expression::BinaryOp {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        };
+    }
+    Ok((rest, left))
+}
+
+fn parse_eq_op(t: TokenSlice) -> IResult<TokenSlice, BinaryOp> {
+    alt((
+        map(token_tag(&Token::Eq), |_| BinaryOp::Eq),
+        map(token_tag(&Token::Neq), |_| BinaryOp::Neq),
+    ))
+    .parse(t)
+}
+
+fn parse_relational_expr(t: TokenSlice) -> IResult<TokenSlice, Expression> {
+    let (rest, mut left) = parse_bitwise_expr(t)?;
+    let (rest, ops) = many0(pair(parse_relational_op, parse_bitwise_expr)).parse(rest)?;
+    for (op, right) in ops {
+        left = Expression::BinaryOp {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        };
+    }
+    Ok((rest, left))
+}
+
+fn parse_relational_op(t: TokenSlice) -> IResult<TokenSlice, BinaryOp> {
+    alt((
+        map(token_tag(&Token::Lt), |_| BinaryOp::Lt),
+        map(token_tag(&Token::Lte), |_| BinaryOp::Lte),
+        map(token_tag(&Token::Gt), |_| BinaryOp::Gt),
+        map(token_tag(&Token::Gte), |_| BinaryOp::Gte),
+    ))
+    .parse(t)
+}
+
+fn parse_bitwise_expr(t: TokenSlice) -> IResult<TokenSlice, Expression> {
+    let (rest, mut left) = parse_concat_expr(t)?;
+    let (rest, ops) = many0(pair(parse_bitwise_op, parse_concat_expr)).parse(rest)?;
+    for (op, right) in ops {
+        left = Expression::BinaryOp {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        };
+    }
+    Ok((rest, left))
+}
+
+fn parse_bitwise_op(t: TokenSlice) -> IResult<TokenSlice, BinaryOp> {
+    alt((
+        map(token_tag(&Token::Ampersand), |_| BinaryOp::BitAnd),
+        map(token_tag(&Token::Pipe), |_| BinaryOp::BitOr),
+        map(token_tag(&Token::Tilde), |_| BinaryOp::BitXor),
+        map(token_tag(&Token::LShift), |_| BinaryOp::LeftShift),
+        map(token_tag(&Token::RShift), |_| BinaryOp::RightShift),
+    ))
+    .parse(t)
+}
+
+fn parse_concat_expr(t: TokenSlice) -> IResult<TokenSlice, Expression> {
+    let (rest, mut left) = parse_additive_expr(t)?;
+    let (rest, ops) = many0(pair(
+        |i| token_tag(&Token::Concat)(i).map(|(r, _)| (r, BinaryOp::Concat)),
+        parse_additive_expr,
+    ))
+    .parse(rest)?;
+    for (op, right) in ops {
+        left = Expression::BinaryOp {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        };
+    }
+    Ok((rest, left))
+}
+
+fn parse_additive_expr(t: TokenSlice) -> IResult<TokenSlice, Expression> {
+    let (rest, mut left) = parse_multiplicative_expr(t)?;
+    let (rest, ops) = many0(pair(parse_additive_op, parse_multiplicative_expr)).parse(rest)?;
+    for (op, right) in ops {
+        left = Expression::BinaryOp {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        };
+    }
+    Ok((rest, left))
+}
+
+fn parse_additive_op(t: TokenSlice) -> IResult<TokenSlice, BinaryOp> {
+    alt((
+        map(token_tag(&Token::Plus), |_| BinaryOp::Add),
+        map(token_tag(&Token::Minus), |_| BinaryOp::Subtract),
+    ))
+    .parse(t)
+}
+
+fn parse_multiplicative_expr(t: TokenSlice) -> IResult<TokenSlice, Expression> {
+    let (rest, mut left) = parse_power_expr(t)?;
+    let (rest, ops) = many0(pair(parse_multiplicative_op, parse_power_expr)).parse(rest)?;
+    for (op, right) in ops {
+        left = Expression::BinaryOp {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        };
+    }
+    Ok((rest, left))
+}
+
+fn parse_multiplicative_op(t: TokenSlice) -> IResult<TokenSlice, BinaryOp> {
+    alt((
+        map(token_tag(&Token::Star), |_| BinaryOp::Multiply),
+        map(token_tag(&Token::Slash), |_| BinaryOp::Divide),
+        map(token_tag(&Token::DoubleSlash), |_| BinaryOp::FloorDivide),
+        map(token_tag(&Token::Percent), |_| BinaryOp::Modulo),
+    ))
+    .parse(t)
+}
+
+fn parse_power_expr(t: TokenSlice) -> IResult<TokenSlice, Expression> {
+    let (rest, left) = parse_unary_expr(t)?;
+    let (rest, op) = opt(token_tag(&Token::Caret)).parse(rest)?;
+    if op.is_some() {
+        let (rest, right) = parse_power_expr(rest)?;
+        Ok((
+            rest,
+            Expression::BinaryOp {
+                left: Box::new(left),
+                op: BinaryOp::Power,
+                right: Box::new(right),
+            },
+        ))
+    } else {
+        Ok((rest, left))
+    }
+}
+
+/// Parse the full expression
+fn parse_expression(t: TokenSlice) -> IResult<TokenSlice, Expression> {
+    parse_or_expr(t)
+}
+
+fn parse_expression_list(t: TokenSlice) -> IResult<TokenSlice, Vec<Expression>> {
+    let (rest, first) = parse_expression(t)?;
+    let (rest, rest_exprs) = many0(pair(token_tag(&Token::Comma), parse_expression)).parse(rest)?;
+
+    let mut result = vec![first];
+    for (_, expr) in rest_exprs {
+        result.push(expr);
+    }
+    Ok((rest, result))
 }
 
 fn parse_return_statement(t: TokenSlice) -> IResult<TokenSlice, ReturnStatement> {
-    Err(nom::Err::Error(nom::error::Error::new(t, nom::error::ErrorKind::Tag)))
+    let (rest, _) = token_tag(&Token::Return).parse(t)?;
+    let (rest, list) = opt(parse_expression_list).parse(rest)?;
+    let (rest, _) = opt(token_tag(&Token::Semicolon)).parse(rest)?;
+    Ok((
+        rest,
+        ReturnStatement {
+            expression_list: list.unwrap_or_default(),
+        },
+    ))
+}
+
+fn token_tag(expected: &Token) -> impl Fn(TokenSlice) -> IResult<TokenSlice, &Token> {
+    let expected = expected.clone();
+    move |input: TokenSlice| {
+        if let Some(tok) = input.0.first() {
+            if tok == &expected {
+                Ok((TokenSlice(&input.0[1..]), tok))
+            } else {
+                Err(nom::Err::Error(nom::error::Error::new(
+                    input,
+                    nom::error::ErrorKind::Tag,
+                )))
+            }
+        } else {
+            Err(nom::Err::Error(nom::error::Error::new(
+                input,
+                nom::error::ErrorKind::Eof,
+            )))
+        }
+    }
 }
 
 pub fn parse(t: TokenSlice) -> IResult<TokenSlice, Block> {
     let (rest, statements) = many0(parse_statement).parse(t)?;
     let (_, return_statement) = opt(parse_return_statement).parse(rest)?;
-    Ok((rest, Block {
-        statements,
-        return_statement,
-    }))
+    Ok((
+        rest,
+        Block {
+            statements,
+            return_statement,
+        },
+    ))
 }
 
 #[cfg(test)]
@@ -432,7 +809,7 @@ mod tests {
                 Token::Local,
                 Token::Identifier("msg".to_string()),
                 Token::Equals,
-                Token::String("hello".to_string())
+                Token::StringLit("hello".to_string())
             ]
         );
     }
@@ -627,11 +1004,11 @@ mod tests {
                 Token::Local,
                 Token::Identifier("msg".to_string()),
                 Token::Equals,
-                Token::String("hello".to_string()),
+                Token::StringLit("hello".to_string()),
                 Token::Concat,
-                Token::String(" ".to_string()),
+                Token::StringLit(" ".to_string()),
                 Token::Concat,
-                Token::String("world".to_string())
+                Token::StringLit("world".to_string())
             ]
         );
     }
@@ -749,7 +1126,7 @@ mod tests {
                 Token::RBracket,
                 Token::Identifier("t".to_string()),
                 Token::LBracket,
-                Token::String("key".to_string()),
+                Token::StringLit("key".to_string()),
                 Token::RBracket,
                 Token::Identifier("t".to_string()),
                 Token::Dot,
