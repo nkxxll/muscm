@@ -355,12 +355,12 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, ::std::string::String> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {
-    statements: Vec<Statement>,
-    return_statement: Option<ReturnStatement>,
+    pub statements: Vec<Statement>,
+    pub return_statement: Option<ReturnStatement>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Statement {
+pub enum Statement {
     Empty,
     Assignment {
         variables: Vec<Expression>,
@@ -412,12 +412,12 @@ enum Statement {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ReturnStatement {
-    expression_list: Vec<Expression>,
+pub struct ReturnStatement {
+    pub expression_list: Vec<Expression>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Expression {
+pub enum Expression {
     Nil,
     Boolean(bool),
     Number(String),
@@ -457,7 +457,7 @@ enum Expression {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum BinaryOp {
+pub enum BinaryOp {
     Add,
     Subtract,
     Multiply,
@@ -482,7 +482,7 @@ enum BinaryOp {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum UnaryOp {
+pub enum UnaryOp {
     Minus,
     Not,
     BitNot,
@@ -490,23 +490,23 @@ enum UnaryOp {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Field {
-    key: FieldKey,
-    value: Expression,
+pub struct Field {
+    pub key: FieldKey,
+    pub value: Expression,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum FieldKey {
+pub enum FieldKey {
     Bracket(Box<Expression>),
     Identifier(String),
     Index(usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct FunctionBody {
-    params: Vec<String>,
-    varargs: bool,
-    block: Box<Block>,
+pub struct FunctionBody {
+    pub params: Vec<String>,
+    pub varargs: bool,
+    pub block: Box<Block>,
 }
 
 fn parse_statement(t: TokenSlice) -> IResult<TokenSlice, Statement> {
@@ -1582,15 +1582,58 @@ fn token_tag(expected: &Token) -> impl Fn(TokenSlice) -> IResult<TokenSlice, &To
     }
 }
 
-/// Parse a block (statement list followed by optional return)
+/// Parse a block of statements, stopping at block-terminating tokens
+/// Block terminators: 'end', 'else', 'elseif', 'until', EOF
 fn parse_block(t: TokenSlice) -> IResult<TokenSlice, Block> {
-    let (rest, statements) = many0(parse_statement).parse(t)?;
-    let (rest, return_statement) = opt(parse_return_statement).parse(rest)?;
+    let mut statements = Vec::new();
+    let mut current = t;
+
+    // Parse statements until we hit a block terminator
+    loop {
+        // Check if we've hit a block terminator or EOF
+        if current.0.is_empty() {
+            break;
+        }
+
+        // Check for block terminating tokens
+        if let Some(token) = current.0.first() {
+            match token {
+                Token::End | Token::Else | Token::Elseif | Token::Until => {
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        // Try to parse a return statement first (since it can be followed by anything)
+        if let Ok((rest, ret_stmt)) = parse_return_statement(current) {
+            return Ok((
+                rest,
+                Block {
+                    statements,
+                    return_statement: Some(ret_stmt),
+                },
+            ));
+        }
+
+        // Try to parse a regular statement
+        match parse_statement(current) {
+            Ok((rest, stmt)) => {
+                statements.push(stmt);
+                current = rest;
+            }
+            Err(_) => {
+                // If we can't parse a statement, we're done with the block
+                break;
+            }
+        }
+    }
+
     Ok((
-        rest,
+        current,
         Block {
             statements,
-            return_statement,
+            return_statement: None,
         },
     ))
 }
@@ -2959,5 +3002,541 @@ mod tests {
             }
             _ => panic!("Expected Assignment, got {:?}", stmt),
         }
+    }
+    
+    // Phase 4: Top-Level Block Parsing Tests
+    
+    #[test]
+    fn test_parse_block_empty() {
+        let code = "";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse_block(ts).unwrap();
+        
+        assert!(block.statements.is_empty());
+        assert!(block.return_statement.is_none());
+        assert!(rest.0.is_empty());
+    }
+    
+    #[test]
+    fn test_parse_block_single_statement() {
+        let code = "x = 1";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse_block(ts).unwrap();
+        
+        assert_eq!(block.statements.len(), 1);
+        assert!(block.return_statement.is_none());
+        assert!(rest.0.is_empty());
+    }
+    
+    #[test]
+    fn test_parse_block_multiple_statements() {
+        let code = "x = 1; y = 2; z = 3";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse_block(ts).unwrap();
+        
+        assert_eq!(block.statements.len(), 5); // 3 assignments + 2 empty statements for semicolons
+        assert!(block.return_statement.is_none());
+        assert!(rest.0.is_empty());
+    }
+    
+    #[test]
+    fn test_parse_block_with_return() {
+        let code = "x = 1; return 42";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse_block(ts).unwrap();
+        
+        assert_eq!(block.statements.len(), 2); // assignment + empty statement
+        assert!(block.return_statement.is_some());
+        assert!(rest.0.is_empty());
+    }
+    
+    #[test]
+    fn test_parse_block_stops_at_end() {
+        let code = "x = 1 end y = 2";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse_block(ts).unwrap();
+        
+        assert_eq!(block.statements.len(), 1);
+        assert!(block.return_statement.is_none());
+        // Should stop before 'end'
+        assert!(!rest.0.is_empty());
+        assert_eq!(rest.0[0], Token::End);
+    }
+    
+    #[test]
+    fn test_parse_block_stops_at_else() {
+        let code = "x = 1 else y = 2";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse_block(ts).unwrap();
+        
+        assert_eq!(block.statements.len(), 1);
+        assert!(block.return_statement.is_none());
+        // Should stop before 'else'
+        assert!(!rest.0.is_empty());
+        assert_eq!(rest.0[0], Token::Else);
+    }
+    
+    #[test]
+    fn test_parse_block_stops_at_elseif() {
+        let code = "x = 1 elseif x > 0 then";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse_block(ts).unwrap();
+        
+        assert_eq!(block.statements.len(), 1);
+        assert!(block.return_statement.is_none());
+        // Should stop before 'elseif'
+        assert!(!rest.0.is_empty());
+        assert_eq!(rest.0[0], Token::Elseif);
+    }
+    
+    #[test]
+    fn test_parse_block_stops_at_until() {
+        let code = "x = 1 until x > 0";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse_block(ts).unwrap();
+        
+        assert_eq!(block.statements.len(), 1);
+        assert!(block.return_statement.is_none());
+        // Should stop before 'until'
+        assert!(!rest.0.is_empty());
+        assert_eq!(rest.0[0], Token::Until);
+    }
+    
+    #[test]
+    fn test_parse_chunk_simple() {
+        let code = "local x = 1; print(x); return x";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+        
+        // Expecting: local, empty (from first semicolon), print call, empty (from second semicolon)
+        assert_eq!(block.statements.len(), 4);
+        assert!(block.return_statement.is_some());
+        assert!(rest.0.is_empty());
+    }
+    
+    #[test]
+    fn test_parse_chunk_with_do_block() {
+        let code = "do local x = 1 end print(x)";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+        
+        assert_eq!(block.statements.len(), 2); // do block + print call
+        assert!(block.return_statement.is_none());
+        assert!(rest.0.is_empty());
+    }
+    
+    #[test]
+    fn test_parse_nested_blocks() {
+        let code = "if x > 0 then y = 1; z = 2 else w = 3 end";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 1);
+        match &block.statements[0] {
+            Statement::If { then_block, else_block, .. } => {
+                assert!(!then_block.statements.is_empty());
+                assert!(else_block.is_some());
+            }
+            _ => panic!("Expected If statement"),
+        }
+        assert!(rest.0.is_empty());
+    }
+
+    // Phase 5: Integration Tests - Complex Programs
+
+    #[test]
+    fn test_complete_program_mixed_statements() {
+        let code = "
+        local x = 10
+        local y = 20
+        local z = x + y
+        print(z)
+        return z
+        ";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 4); // 3 local vars + 1 print call
+        assert!(block.return_statement.is_some());
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_nested_loops() {
+        let code = "
+        for i = 1, 10 do
+            for j = 1, 5 do
+                print(i, j)
+            end
+        end
+        ";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 1);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_nested_if_statements() {
+        let code = "
+        if x > 0 then
+            if y > 0 then
+                z = 1
+            else
+                z = 2
+            end
+        end
+        ";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 1);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_function_with_nested_blocks() {
+        let code = "
+        function foo(a, b)
+            if a > b then
+                return a
+            else
+                return b
+            end
+        end
+        ";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 1);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_mixed_operators_complex_expression() {
+        let code = "x = 1 + 2 * 3 ^ 2 - 4 / 5";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 1);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_table_with_mixed_fields() {
+        let code = "t = {1, 2, 3, x = 10, [5] = 20, 30}";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 1);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_function_calls_with_various_args() {
+        let code = "
+        foo()
+        bar(1, 2, 3)
+        baz(\"string\")
+        qux{a=1, b=2}
+        ";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 4);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_method_calls() {
+        let code = "
+        obj:method()
+        obj:method(1, 2)
+        obj:method{x=1}
+        ";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 3);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_complex_assignment() {
+        let code = "a, b, c = 1, 2, 3";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 1);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_while_with_break() {
+        let code = "
+        while true do
+            if x > 10 then
+                break
+            end
+            x = x + 1
+        end
+        ";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 1);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_repeat_until() {
+        let code = "
+        repeat
+            x = x + 1
+        until x > 10
+        ";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 1);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_for_generic_loop() {
+        let code = "
+        for k, v in pairs(t) do
+            print(k, v)
+        end
+        ";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 1);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_local_function_declaration() {
+        let code = "
+        local function helper(x)
+            return x * 2
+        end
+        ";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 1);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_multiple_returns() {
+        let code = "
+        function foo(x)
+            if x > 0 then
+                return x, \"positive\"
+            else
+                return -x, \"negative\"
+            end
+        end
+        ";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 1);
+        assert!(rest.0.is_empty());
+    }
+
+    // Edge cases for Phase 5
+
+    #[test]
+    fn test_empty_program() {
+        let code = "";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 0);
+        assert!(block.return_statement.is_none());
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_only_comments_and_whitespace() {
+        let code = "-- comment 1\n  \n-- comment 2";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 0);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_multiple_empty_statements() {
+        let code = ";;; x = 1 ;;;";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        // 3 empty + 1 assignment + 3 empty
+        assert_eq!(block.statements.len(), 7);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_operator_precedence_parens() {
+        let code = "x = (1 + 2) * 3";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 1);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_unary_with_binary() {
+        let code = "x = -5 + 3; y = not true and false";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        // x = -5 + 3 (1) + ; (1) + y = not true and false (1) = 3 statements
+        assert_eq!(block.statements.len(), 3);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_string_concatenation_chain() {
+        let code = "s = \"a\" .. \"b\" .. \"c\" .. \"d\"";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 1);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_label_and_goto() {
+        let code = "
+        ::start::
+        print(1)
+        goto finish
+        print(2)
+        ::finish::
+        print(3)
+        ";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 6); // label, print, goto, print, label, print
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_table_indexing_chains() {
+        let code = "x = t[1][2][3]; y = t.a.b.c; z = t[k].field[m]";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        // x = t[1][2][3] (1) + ; (1) + y = t.a.b.c (1) + ; (1) + z = t[k].field[m] (1) = 5
+        assert_eq!(block.statements.len(), 5);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_varargs_in_function() {
+        let code = "
+        function print_all(...)
+            return ...
+        end
+        ";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 1);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_do_block_scoping() {
+        let code = "
+        x = 1
+        do
+            local x = 2
+            y = x
+        end
+        z = x
+        ";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 3); // x = 1, do block, z = x
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_multiple_elseif() {
+        let code = "
+        if x == 1 then
+            print(1)
+        elseif x == 2 then
+            print(2)
+        elseif x == 3 then
+            print(3)
+        else
+            print(0)
+        end
+        ";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 1);
+        assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_anonymous_function() {
+        let code = "f = function(x) return x * 2 end";
+        let tokens = tokenize(code).unwrap();
+        let ts = TokenSlice::from(tokens.as_slice());
+        let (rest, block) = parse(ts).unwrap();
+
+        assert_eq!(block.statements.len(), 1);
+        assert!(rest.0.is_empty());
     }
 }
