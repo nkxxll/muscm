@@ -1,4 +1,4 @@
-use crate::ast::SExpr;
+use crate::ast::{Arena, NodeId, SExpr};
 use std::fmt;
 
 /// Runtime value representation for Scheme
@@ -340,19 +340,35 @@ pub struct Interpreter;
 
 impl Interpreter {
     /// Convert an SExpr to an SVal (for quoted expressions)
-    fn sexpr_to_sval(expr: &SExpr) -> SVal {
+    fn sexpr_to_sval(expr: &SExpr, arena: &Arena) -> SVal {
         match expr {
             SExpr::Number(n) => SVal::Number(*n),
             SExpr::String(s) => SVal::String(s.clone()),
             SExpr::Bool(b) => SVal::Bool(*b),
             SExpr::Char(c) => SVal::Char(*c),
             SExpr::Atom(a) => SVal::Atom(a.clone()),
-            SExpr::Quote(e) => SVal::List(vec![
-                SVal::Atom("quote".to_string()),
-                Self::sexpr_to_sval(e),
-            ]),
-            SExpr::List(items) => SVal::List(items.iter().map(Self::sexpr_to_sval).collect()),
-            SExpr::Vector(items) => SVal::Vector(items.iter().map(Self::sexpr_to_sval).collect()),
+            SExpr::Quote(id) => {
+                if let Some(node) = arena.get(*id) {
+                    SVal::List(vec![
+                        SVal::Atom("quote".to_string()),
+                        Self::sexpr_to_sval(node, arena),
+                    ])
+                } else {
+                    SVal::Nil
+                }
+            }
+            SExpr::List(ids) => {
+                let items: Vec<SVal> = ids.iter()
+                    .filter_map(|id| arena.get(*id).map(|e| Self::sexpr_to_sval(e, arena)))
+                    .collect();
+                SVal::List(items)
+            }
+            SExpr::Vector(ids) => {
+                let items: Vec<SVal> = ids.iter()
+                    .filter_map(|id| arena.get(*id).map(|e| Self::sexpr_to_sval(e, arena)))
+                    .collect();
+                SVal::Vector(items)
+            }
             _ => SVal::Nil, // Unquote, QuasiQuote, etc. become nil in simple implementation
         }
     }
@@ -363,56 +379,69 @@ impl Interpreter {
     }
 
     /// Evaluate quote special form: (quote expr)
-    fn eval_quote(items: &[SExpr]) -> Result<SVal, String> {
-        if items.len() != 2 {
+    fn eval_quote(ids: &[NodeId], arena: &Arena) -> Result<SVal, String> {
+        if ids.len() != 2 {
             return Err("quote expects exactly 1 argument".to_string());
         }
-        Ok(Self::sexpr_to_sval(&items[1]))
+        if let Some(expr) = arena.get(ids[1]) {
+            Ok(Self::sexpr_to_sval(expr, arena))
+        } else {
+            Err("Invalid quote reference".to_string())
+        }
     }
 
     /// Evaluate if special form: (if condition consequent alternative?)
-    fn eval_if(items: &[SExpr], env: &mut Environment) -> Result<SVal, String> {
-        if items.len() < 3 || items.len() > 4 {
+    fn eval_if(ids: &[NodeId], env: &mut Environment, arena: &Arena) -> Result<SVal, String> {
+        if ids.len() < 3 || ids.len() > 4 {
             return Err("if expects 2 or 3 arguments".to_string());
         }
-        let cond = Self::eval(&items[1], env)?;
+        let cond_expr = arena.get(ids[1]).ok_or("Invalid if condition reference")?;
+        let cond = Self::eval(cond_expr, env, arena)?;
         if Self::is_truthy(&cond) {
-            Self::eval(&items[2], env)
-        } else if items.len() == 4 {
-            Self::eval(&items[3], env)
+            let then_expr = arena.get(ids[2]).ok_or("Invalid if then reference")?;
+            Self::eval(then_expr, env, arena)
+        } else if ids.len() == 4 {
+            let else_expr = arena.get(ids[3]).ok_or("Invalid if else reference")?;
+            Self::eval(else_expr, env, arena)
         } else {
             Ok(SVal::Nil)
         }
     }
 
     /// Evaluate begin special form: (begin expr1 expr2 ... exprN)
-    fn eval_begin(items: &[SExpr], env: &mut Environment) -> Result<SVal, String> {
+    fn eval_begin(ids: &[NodeId], env: &mut Environment, arena: &Arena) -> Result<SVal, String> {
         let mut result = SVal::Nil;
-        for expr in &items[1..] {
-            result = Self::eval(expr, env)?;
+        for id in &ids[1..] {
+            if let Some(expr) = arena.get(*id) {
+                result = Self::eval(expr, env, arena)?;
+            }
         }
         Ok(result)
     }
 
     /// Evaluate define special form: (define name value) or (define (name params...) body)
-    fn eval_define(items: &[SExpr], env: &mut Environment) -> Result<SVal, String> {
-        if items.len() < 3 {
+    fn eval_define(ids: &[NodeId], env: &mut Environment, arena: &Arena) -> Result<SVal, String> {
+        if ids.len() < 3 {
             return Err("define expects at least 2 arguments".to_string());
         }
 
-        match &items[1] {
+        let name_expr = arena.get(ids[1]).ok_or("Invalid define name reference")?;
+        match name_expr {
             // Simple variable definition: (define x 42)
             SExpr::Atom(name) => {
-                let value = Self::eval(&items[2], env)?;
+                let value_expr = arena.get(ids[2]).ok_or("Invalid define value reference")?;
+                let value = Self::eval(value_expr, env, arena)?;
                 env.define(name.clone(), value);
                 Ok(SVal::Nil)
             }
             // Function definition: (define (name params...) body...)
-            SExpr::List(sig) if !sig.is_empty() => {
-                match &sig[0] {
+            SExpr::List(sig_ids) if !sig_ids.is_empty() => {
+                let func_expr = arena.get(sig_ids[0]).ok_or("Invalid function name reference")?;
+                match func_expr {
                     SExpr::Atom(func_name) => {
-                        let params: Result<Vec<String>, String> = sig[1..]
+                        let params: Result<Vec<String>, String> = sig_ids[1..]
                             .iter()
+                            .filter_map(|id| arena.get(*id))
                             .map(|p| {
                                 if let SExpr::Atom(s) = p {
                                     Ok(s.clone())
@@ -424,14 +453,16 @@ impl Interpreter {
                         let params = params?;
 
                         // Combine remaining items as body (implicit begin)
-                        let body = if items.len() == 3 {
-                            items[2].clone()
+                        let body = if ids.len() == 3 {
+                            arena.get(ids[2]).ok_or("Invalid body reference")?.clone()
                         } else {
-                            SExpr::List(
-                                std::iter::once(SExpr::Atom("begin".to_string()))
-                                    .chain(items[2..].iter().cloned())
-                                    .collect(),
-                            )
+                            // Create a begin form with body expressions
+                            // This is tricky - we need to create new SExpr nodes in the arena
+                            let mut body_ids = vec![];
+                            for body_id in &ids[2..] {
+                                body_ids.push(*body_id);
+                            }
+                            SExpr::List(body_ids)
                         };
 
                         let func = SVal::UserProc {
@@ -449,13 +480,15 @@ impl Interpreter {
     }
 
     /// Evaluate lambda special form: (lambda (params...) body...)
-    fn eval_lambda(items: &[SExpr]) -> Result<SVal, String> {
-        if items.len() < 3 {
+    fn eval_lambda(ids: &[NodeId], arena: &Arena) -> Result<SVal, String> {
+        if ids.len() < 3 {
             return Err("lambda expects at least 2 arguments".to_string());
         }
-        let params = match &items[1] {
-            SExpr::List(ps) => ps
+        let params_expr = arena.get(ids[1]).ok_or("Invalid lambda params reference")?;
+        let params = match params_expr {
+            SExpr::List(ps_ids) => ps_ids
                 .iter()
+                .filter_map(|id| arena.get(*id))
                 .map(|p| {
                     if let SExpr::Atom(s) = p {
                         Ok(s.clone())
@@ -468,14 +501,15 @@ impl Interpreter {
         };
 
         // Combine remaining items as body (implicit begin)
-        let body = if items.len() == 3 {
-            items[2].clone()
+        let body = if ids.len() == 3 {
+            arena.get(ids[2]).ok_or("Invalid lambda body reference")?.clone()
         } else {
-            SExpr::List(
-                std::iter::once(SExpr::Atom("begin".to_string()))
-                    .chain(items[2..].iter().cloned())
-                    .collect(),
-            )
+            // Create list of body ids
+            let mut body_ids = vec![];
+            for body_id in &ids[2..] {
+                body_ids.push(*body_id);
+            }
+            SExpr::List(body_ids)
         };
 
         Ok(SVal::UserProc {
@@ -485,7 +519,7 @@ impl Interpreter {
     }
 
     /// Call a function value with arguments
-    fn call_function(func: SVal, args: Vec<SVal>, env: &mut Environment) -> Result<SVal, String> {
+    fn call_function(func: SVal, args: Vec<SVal>, env: &mut Environment, arena: &Arena) -> Result<SVal, String> {
         match func {
             SVal::BuiltinProc { name: fname, .. } => Self::apply_builtin(&fname, args, env),
             SVal::UserProc { params, body } => {
@@ -503,7 +537,7 @@ impl Interpreter {
                     call_env.define(param.clone(), arg.clone());
                 }
 
-                Self::eval(&body, &mut call_env)
+                Self::eval(&body, &mut call_env, arena)
             }
             _ => Err(format!("Cannot call non-function value: {}", func)),
         }
@@ -774,7 +808,7 @@ impl Interpreter {
     }
 
     /// Evaluate an S-expression in the given environment
-    pub fn eval(expr: &SExpr, env: &mut Environment) -> Result<SVal, String> {
+    pub fn eval(expr: &SExpr, env: &mut Environment, arena: &Arena) -> Result<SVal, String> {
         match expr {
             // Literals evaluate to themselves
             SExpr::Number(n) => Ok(SVal::Number(*n)),
@@ -788,42 +822,55 @@ impl Interpreter {
                 .ok_or_else(|| format!("Unbound variable: {}", name)),
 
             // Quote: return the expression as a literal value
-            SExpr::Quote(e) => Ok(Self::sexpr_to_sval(e)),
+            SExpr::Quote(id) => {
+                if let Some(node) = arena.get(*id) {
+                    Ok(Self::sexpr_to_sval(node, arena))
+                } else {
+                    Err("Invalid quote reference".to_string())
+                }
+            }
 
             // Non-empty lists: function calls and special forms
-            SExpr::List(items) => {
-                if items.is_empty() {
+            SExpr::List(ids) => {
+                if ids.is_empty() {
                     return Ok(SVal::Nil);
                 }
-                match &items[0] {
+                let first_expr = arena.get(ids[0]).ok_or("Invalid list head reference")?;
+                match first_expr {
                     SExpr::Atom(name) => {
                         // Special forms
                         match name.as_str() {
-                            "quote" => Self::eval_quote(&items),
-                            "if" => Self::eval_if(&items, env),
-                            "define" => Self::eval_define(&items, env),
-                            "begin" => Self::eval_begin(&items, env),
-                            "lambda" => Self::eval_lambda(&items),
+                            "quote" => Self::eval_quote(&ids, arena),
+                            "if" => Self::eval_if(&ids, env, arena),
+                            "define" => Self::eval_define(&ids, env, arena),
+                            "begin" => Self::eval_begin(&ids, env, arena),
+                            "lambda" => Self::eval_lambda(&ids, arena),
 
                             // Regular function call
                             _ => {
-                                let func = Self::eval(&items[0], env)?;
+                                let func = Self::eval(first_expr, env, arena)?;
                                 let args: Result<Vec<SVal>, String> =
-                                    items[1..].iter().map(|arg| Self::eval(arg, env)).collect();
+                                    ids[1..].iter()
+                                        .filter_map(|id| arena.get(*id))
+                                        .map(|arg| Self::eval(arg, env, arena))
+                                        .collect();
                                 let args = args?;
 
-                                Self::call_function(func, args, env)
+                                Self::call_function(func, args, env, arena)
                             }
                         }
                     }
                     // If the first element is not an atom, evaluate it
                     _ => {
-                        let func = Self::eval(&items[0], env)?;
+                        let func = Self::eval(first_expr, env, arena)?;
                         let args: Result<Vec<SVal>, String> =
-                            items[1..].iter().map(|arg| Self::eval(arg, env)).collect();
+                            ids[1..].iter()
+                                .filter_map(|id| arena.get(*id))
+                                .map(|arg| Self::eval(arg, env, arena))
+                                .collect();
                         let args = args?;
 
-                        Self::call_function(func, args, env)
+                        Self::call_function(func, args, env, arena)
                     }
                 }
             }

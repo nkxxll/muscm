@@ -73,12 +73,14 @@ fn main() {
 "#;
 
     match parse(input) {
-        Ok(exprs) => {
+        Ok((arena, node_ids)) => {
             let mut env = Environment::new();
-            for expr in exprs {
-                match Interpreter::eval(&expr, &mut env) {
-                    Ok(val) => println!("{}", val),
-                    Err(e) => println!("ERROR: {}", e),
+            for node_id in node_ids {
+                if let Some(expr) = arena.get(node_id) {
+                    match Interpreter::eval(expr, &mut env, &arena) {
+                        Ok(val) => println!("{}", val),
+                        Err(e) => println!("ERROR: {}", e),
+                    }
                 }
             }
         }
