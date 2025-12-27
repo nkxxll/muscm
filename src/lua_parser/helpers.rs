@@ -88,12 +88,19 @@ pub fn number(input: &str) -> IResult<&str, &str> {
 }
 
 pub fn string_literal(input: &str) -> IResult<&str, String> {
-    let (input, _) = char('"').parse(input)?;
-    let (input, content) = take_while1(|c: char| c != '"').parse(input)?;
-    let (input, _) = char('"').parse(input)?;
-
-    let processed = process_escape_sequences(content);
-    Ok((input, processed))
+    if input.starts_with('\'') {
+        let (input, _) = char('\'').parse(input)?;
+        let (input, content) = take_while(|c: char| c != '\'').parse(input)?;
+        let (input, _) = char('\'').parse(input)?;
+        let processed = process_escape_sequences(content);
+        Ok((input, processed))
+    } else {
+        let (input, _) = char('"').parse(input)?;
+        let (input, content) = take_while(|c: char| c != '"').parse(input)?;
+        let (input, _) = char('"').parse(input)?;
+        let processed = process_escape_sequences(content);
+        Ok((input, processed))
+    }
 }
 
 pub fn process_escape_sequences(s: &str) -> String {

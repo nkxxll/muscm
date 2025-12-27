@@ -24,6 +24,7 @@
 mod helpers;
 mod expression;
 mod statement;
+pub mod location;
 
 pub use helpers::{tokenize_single, KEYWORDS, SYMBOLS};
 pub use expression::{parse_expression, parse_expression_list, parse_prefix_exp};
@@ -32,6 +33,7 @@ pub use statement::parse_block;
 use nom::{IResult, Input, Needed};
 
 use crate::lua_parser_types as types;
+pub use location::{Location, LocationTracker, TokenWithLocation};
 
 // Re-export main AST types
 pub use types::{
@@ -148,6 +150,36 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
 
         tokens.push(tok);
         remaining = rest;
+    }
+
+    Ok(tokens)
+}
+
+/// Tokenize Lua source code with location tracking
+pub fn tokenize_with_location(input: &str) -> Result<Vec<TokenWithLocation>, String> {
+    let mut tokens = Vec::new();
+    let mut tracker = LocationTracker::new();
+    let mut remaining = input;
+
+    loop {
+        // Skip whitespace and comments, tracking position
+        let consumed = tracker.skip_whitespace_and_comments(remaining);
+        remaining = &remaining[consumed..];
+
+        if remaining.is_empty() {
+            break;
+        }
+
+        let token_location = tracker.current();
+        let (rest, tok) = tokenize_single(remaining)
+            .map_err(|e| format!("Tokenization error at {}: {:?}", token_location, e))?;
+
+        // Advance tracker past the consumed token
+        let token_length = remaining.len() - rest.len();
+        tracker.advance_str(&remaining[..token_length]);
+        remaining = rest;
+
+        tokens.push(TokenWithLocation::new(tok, token_location));
     }
 
     Ok(tokens)
@@ -406,5 +438,45 @@ mod tests {
 
         assert_eq!(block.statements.len(), 1);
         assert!(rest.0.is_empty());
+    }
+
+    #[test]
+    fn test_tokenize_with_location() {
+        let code = "x = 5";
+        let tokens = tokenize_with_location(code).unwrap();
+        assert_eq!(tokens.len(), 3); // x, =, 5
+
+        // First token (x) should be at line 1, column 0
+        assert_eq!(tokens[0].location.line, 1);
+        assert_eq!(tokens[0].location.column, 0);
+
+        // Second token (=) should be at line 1, column 2
+        assert_eq!(tokens[1].location.line, 1);
+        assert_eq!(tokens[1].location.column, 2);
+
+        // Third token (5) should be at line 1, column 4
+        assert_eq!(tokens[2].location.line, 1);
+        assert_eq!(tokens[2].location.column, 4);
+    }
+
+    #[test]
+    fn test_tokenize_with_location_multiline() {
+        let code = "x = 5\ny = 10";
+        let tokens = tokenize_with_location(code).unwrap();
+
+        // Find the 'y' token
+        let y_token = tokens.iter().find(|t| matches!(t.token, Token::Identifier(ref s) if s == "y")).unwrap();
+        assert_eq!(y_token.location.line, 2);
+        assert_eq!(y_token.location.column, 0);
+    }
+
+    #[test]
+    fn test_tokenize_with_location_comments() {
+        let code = "x = 5 -- comment\ny = 10";
+        let tokens = tokenize_with_location(code).unwrap();
+
+        // The 'y' token should be on line 2
+        let y_token = tokens.iter().find(|t| matches!(t.token, Token::Identifier(ref s) if s == "y")).unwrap();
+        assert_eq!(y_token.location.line, 2);
     }
 }

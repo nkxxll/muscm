@@ -6,6 +6,7 @@
 /// - Statement executor: pattern matches on Statement enum and executes each type
 /// - Expression evaluator: recursively evaluates expressions with proper type coercion
 /// - Function call mechanism: invokes functions using call frames from Phase 2
+use crate::error_types::{LuaError, LuaResult};
 use crate::lua_interpreter::LuaInterpreter;
 use crate::lua_parser::{
     BinaryOp, Block, Expression, Field, FieldKey, FunctionBody, Statement, UnaryOp,
@@ -51,7 +52,7 @@ impl Executor {
         &mut self,
         block: &Block,
         interp: &mut LuaInterpreter,
-    ) -> Result<ControlFlow, String> {
+    ) -> LuaResult<ControlFlow> {
         for statement in &block.statements {
             match self.execute_statement(statement, interp)? {
                 ControlFlow::Normal => continue,
@@ -74,7 +75,7 @@ impl Executor {
         &mut self,
         stmt: &Statement,
         interp: &mut LuaInterpreter,
-    ) -> Result<ControlFlow, String> {
+    ) -> LuaResult<ControlFlow> {
         match stmt {
             Statement::Empty => Ok(ControlFlow::Normal),
 
@@ -162,7 +163,7 @@ impl Executor {
                         let base_name = parts[0];
                         let mut table = interp
                             .lookup(base_name)
-                            .ok_or_else(|| format!("Table '{}' not found", base_name))?;
+                            .ok_or_else(|| LuaError::runtime(format!("Table '{}' not found", base_name), "function_decl"))?;
 
                         // Navigate through intermediate tables
                         for i in 1..parts.len() - 1 {
@@ -171,11 +172,11 @@ impl Executor {
                                     let key = LuaValue::String(parts[i].to_string());
                                     let next =
                                         t.borrow().data.get(&key).cloned().ok_or_else(|| {
-                                            format!("Key '{}' not found in table", parts[i])
+                                            LuaError::runtime(format!("Key '{}' not found in table", parts[i]), "function_decl")
                                         })?;
                                     table = next;
                                 }
-                                _ => return Err(format!("'{}' is not a table", parts[i - 1])),
+                                _ => return Err(LuaError::runtime(format!("'{}' is not a table", parts[i - 1]), "function_decl")),
                             }
                         }
 
@@ -184,7 +185,7 @@ impl Executor {
                             let final_key = LuaValue::String(parts[parts.len() - 1].to_string());
                             t.borrow_mut().data.insert(final_key, func_value);
                         } else {
-                            return Err("Cannot assign to non-table".to_string());
+                            return Err(LuaError::runtime("Cannot assign to non-table".to_string(), "function_decl"));
                         }
                     }
                 } else {
@@ -222,7 +223,7 @@ impl Executor {
         variables: &[Expression],
         values: &[Expression],
         interp: &mut LuaInterpreter,
-    ) -> Result<(), String> {
+    ) -> LuaResult<()> {
         // Evaluate all RHS expressions
         let mut rhs_values = self.eval_expression_list(values, interp)?;
 
@@ -257,7 +258,7 @@ impl Executor {
                     self.table_set(&table, key, value.clone())?;
                 }
 
-                _ => return Err("Invalid assignment target".to_string()),
+                _ => return Err(LuaError::runtime("Invalid assignment target", "assignment")),
             }
         }
 
@@ -270,7 +271,7 @@ impl Executor {
         condition: &Expression,
         body: &Block,
         interp: &mut LuaInterpreter,
-    ) -> Result<ControlFlow, String> {
+    ) -> LuaResult<ControlFlow> {
         loop {
             let cond_val = self.eval_expression(condition, interp)?;
             if !cond_val.is_truthy() {
@@ -281,7 +282,7 @@ impl Executor {
                 ControlFlow::Normal => continue,
                 ControlFlow::Break => break,
                 ControlFlow::Return(vals) => return Ok(ControlFlow::Return(vals)),
-                ControlFlow::Goto(_) => return Err("Goto not yet fully supported".to_string()),
+                ControlFlow::Goto(_) => return Err(LuaError::runtime("Goto not yet fully supported", "goto execution")),
             }
         }
         Ok(ControlFlow::Normal)
@@ -293,13 +294,13 @@ impl Executor {
         body: &Block,
         condition: &Expression,
         interp: &mut LuaInterpreter,
-    ) -> Result<ControlFlow, String> {
+    ) -> LuaResult<ControlFlow> {
         loop {
             match self.execute_block(body, interp)? {
                 ControlFlow::Normal => {}
                 ControlFlow::Break => return Ok(ControlFlow::Normal),
                 ControlFlow::Return(vals) => return Ok(ControlFlow::Return(vals)),
-                ControlFlow::Goto(_) => return Err("Goto not yet fully supported".to_string()),
+                ControlFlow::Goto(_) => return Err(LuaError::runtime("Goto not yet fully supported", "goto execution")),
             }
 
             let cond_val = self.eval_expression(condition, interp)?;
@@ -318,7 +319,7 @@ impl Executor {
         elseif_parts: &[(Expression, Block)],
         else_block: &Option<Box<Block>>,
         interp: &mut LuaInterpreter,
-    ) -> Result<ControlFlow, String> {
+    ) -> LuaResult<ControlFlow> {
         let cond_val = self.eval_expression(condition, interp)?;
         if cond_val.is_truthy() {
             return self.execute_block(then_block, interp);
@@ -349,7 +350,7 @@ impl Executor {
         step: Option<&Expression>,
         body: &Block,
         interp: &mut LuaInterpreter,
-    ) -> Result<ControlFlow, String> {
+    ) -> LuaResult<ControlFlow> {
         let start_val = self.eval_expression(start, interp)?.to_number()?;
         let end_val = self.eval_expression(end, interp)?.to_number()?;
         let step_val = if let Some(s) = step {
@@ -359,7 +360,7 @@ impl Executor {
         };
 
         if step_val == 0.0 {
-            return Err("for step cannot be zero".to_string());
+            return Err(LuaError::value("for step cannot be zero"));
         }
 
         // Create new scope for loop variable
@@ -384,7 +385,7 @@ impl Executor {
                 }
                 ControlFlow::Goto(_) => {
                     interp.pop_scope();
-                    return Err("Goto not yet fully supported".to_string());
+                    return Err(LuaError::runtime("Goto not yet fully supported", "executor"));
                 }
             }
 
@@ -402,7 +403,7 @@ impl Executor {
         iterables: &[Expression],
         body: &Block,
         interp: &mut LuaInterpreter,
-    ) -> Result<ControlFlow, String> {
+    ) -> LuaResult<ControlFlow> {
         // Evaluate iterator expressions
         let iterator_vals = self.eval_expression_list(iterables, interp)?;
 
@@ -444,7 +445,7 @@ impl Executor {
                             }
                             ControlFlow::Goto(_) => {
                                 interp.pop_scope();
-                                return Err("Goto not yet fully supported".to_string());
+                                return Err(LuaError::runtime("Goto not yet fully supported", "executor"));
                             }
                         }
                     }
@@ -452,9 +453,9 @@ impl Executor {
                     interp.pop_scope();
                 }
                 _ => {
-                    return Err(format!(
-                        "Cannot iterate over {} value",
-                        iterable.type_name()
+                    return Err(LuaError::runtime(
+                        format!("Cannot iterate over {} value", iterable.type_name()),
+                        "for-in iteration"
                     ))
                 }
             }
@@ -468,7 +469,7 @@ impl Executor {
         &mut self,
         expr: &Expression,
         interp: &mut LuaInterpreter,
-    ) -> Result<LuaValue, String> {
+    ) -> LuaResult<LuaValue> {
         match expr {
             Expression::Nil => Ok(LuaValue::Nil),
             Expression::Boolean(b) => Ok(LuaValue::Boolean(*b)),
@@ -542,7 +543,7 @@ impl Executor {
         &mut self,
         exprs: &[Expression],
         interp: &mut LuaInterpreter,
-    ) -> Result<Vec<LuaValue>, String> {
+    ) -> LuaResult<Vec<LuaValue>> {
         let mut results = Vec::new();
         for expr in exprs {
             results.push(self.eval_expression(expr, interp)?);
@@ -557,7 +558,7 @@ impl Executor {
         op: &BinaryOp,
         right: &Expression,
         interp: &mut LuaInterpreter,
-    ) -> Result<LuaValue, String> {
+    ) -> LuaResult<LuaValue> {
         // Short-circuit evaluation for 'and' and 'or'
         match op {
             BinaryOp::And => {
@@ -588,7 +589,7 @@ impl Executor {
         left: &LuaValue,
         op: &BinaryOp,
         right: &LuaValue,
-    ) -> Result<LuaValue, String> {
+    ) -> LuaResult<LuaValue> {
         match op {
             BinaryOp::Add => {
                 let l = left.to_number()?;
@@ -609,7 +610,7 @@ impl Executor {
                 let l = left.to_number()?;
                 let r = right.to_number()?;
                 if r == 0.0 {
-                    return Err("Division by zero".to_string());
+                    return Err(LuaError::DivisionByZero);
                 }
                 Ok(LuaValue::Number(l / r))
             }
@@ -617,7 +618,7 @@ impl Executor {
                 let l = left.to_number()?;
                 let r = right.to_number()?;
                 if r == 0.0 {
-                    return Err("Division by zero".to_string());
+                    return Err(LuaError::DivisionByZero);
                 }
                 Ok(LuaValue::Number((l / r).floor()))
             }
@@ -625,7 +626,7 @@ impl Executor {
                 let l = left.to_number()?;
                 let r = right.to_number()?;
                 if r == 0.0 {
-                    return Err("Modulo by zero".to_string());
+                    return Err(LuaError::DivisionByZero);
                 }
                 Ok(LuaValue::Number(l % r))
             }
@@ -698,7 +699,7 @@ impl Executor {
         op: &UnaryOp,
         operand: &Expression,
         interp: &mut LuaInterpreter,
-    ) -> Result<LuaValue, String> {
+    ) -> LuaResult<LuaValue> {
         let val = self.eval_expression(operand, interp)?;
         match op {
             UnaryOp::Minus => {
@@ -723,14 +724,18 @@ impl Executor {
                             .count();
                         Ok(LuaValue::Number(count as f64))
                     }
-                    _ => Err(format!("Cannot get length of {}", val.type_name())),
+                    _ => Err(LuaError::type_error(
+                        "string or table",
+                        val.type_name(),
+                        "length operator"
+                    )),
                 }
             }
         }
     }
 
     /// Get value from table
-    fn table_get(&self, table: &LuaValue, key: LuaValue) -> Result<LuaValue, String> {
+    fn table_get(&self, table: &LuaValue, key: LuaValue) -> LuaResult<LuaValue> {
         match table {
             LuaValue::Table(t) => {
                 let table_ref = t.borrow();
@@ -765,19 +770,19 @@ impl Executor {
 
                 Ok(LuaValue::Nil)
             }
-            _ => Err(format!("table get: Cannot index {}", table.type_name())),
+            _ => Err(LuaError::index(table.type_name(), "unknown")),
         }
     }
 
     /// Set value in table
-    fn table_set(&self, table: &LuaValue, key: LuaValue, value: LuaValue) -> Result<(), String> {
+    fn table_set(&self, table: &LuaValue, key: LuaValue, value: LuaValue) -> LuaResult<()> {
         match table {
             LuaValue::Table(t) => {
                 let mut table_ref = t.borrow_mut();
                 table_ref.data.insert(key, value);
                 Ok(())
             }
-            _ => Err(format!("table set: Cannot index {}", table.type_name())),
+            _ => Err(LuaError::index(table.type_name(), "unknown")),
         }
     }
 
@@ -786,7 +791,7 @@ impl Executor {
         &mut self,
         fields: &[Field],
         interp: &mut LuaInterpreter,
-    ) -> Result<LuaValue, String> {
+    ) -> LuaResult<LuaValue> {
         let table = interp.create_table();
         match table {
             LuaValue::Table(t) => {
@@ -821,7 +826,7 @@ impl Executor {
         &self,
         body: Box<FunctionBody>,
         interp: &LuaInterpreter,
-    ) -> Result<LuaValue, String> {
+    ) -> LuaResult<LuaValue> {
         // Capture variables from current scope (closure)
         // For now, capture all accessible variables
         let mut captured = HashMap::new();
@@ -857,7 +862,7 @@ impl Executor {
         func: LuaValue,
         args: Vec<LuaValue>,
         interp: &mut LuaInterpreter,
-    ) -> Result<LuaValue, String> {
+    ) -> LuaResult<LuaValue> {
         use crate::error_types::LuaError;
 
         match func {
@@ -936,11 +941,11 @@ impl Executor {
                             // Return first value or nil if no return
                             Ok(values.first().cloned().unwrap_or(LuaValue::Nil))
                         }
-                        _ => Err("Unexpected control flow in function".to_string()),
+                        _ => Err(LuaError::runtime("Unexpected control flow in function", "function call")),
                     }
                 }
             },
-            _ => Err(format!("Cannot call {}", func.type_name())),
+            _ => Err(LuaError::call(func.type_name())),
         }
     }
 
@@ -949,7 +954,7 @@ impl Executor {
         &mut self,
         module_name: &str,
         interp: &mut LuaInterpreter,
-    ) -> Result<LuaValue, String> {
+    ) -> LuaResult<LuaValue> {
         use crate::lua_parser::{self, TokenSlice};
 
         // Check cache first (without needing to hold borrow)
@@ -998,7 +1003,7 @@ impl Executor {
                     .borrow_mut()
                     .loading
                     .remove(module_name);
-                return Err(format!("Cannot read module '{}': {}", module_name, e));
+                return Err(LuaError::module(module_name, format!("Cannot read file: {}", e)));
             }
         };
 
@@ -1011,7 +1016,7 @@ impl Executor {
                     .borrow_mut()
                     .loading
                     .remove(module_name);
-                return Err(format!("Tokenize error in module '{}': {}", module_name, e));
+                return Err(LuaError::module(module_name, format!("Tokenization failed: {}", e)));
             }
         };
 
@@ -1025,7 +1030,7 @@ impl Executor {
                     .borrow_mut()
                     .loading
                     .remove(module_name);
-                return Err(format!("Parse error in module '{}': {}", module_name, e));
+                return Err(LuaError::module(module_name, format!("Parse failed: {}", e)));
             }
         };
 
@@ -1048,7 +1053,7 @@ impl Executor {
                     .borrow_mut()
                     .loading
                     .remove(module_name);
-                return Err(format!("Runtime error in module '{}': {}", module_name, e));
+                return Err(LuaError::module(module_name, format!("Execution failed: {}", e)));
             }
         };
 

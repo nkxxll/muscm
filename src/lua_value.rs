@@ -137,16 +137,17 @@ impl LuaValue {
     }
 
     /// Convert value to number (Lua type coercion)
-    pub fn to_number(&self) -> Result<f64, String> {
+    pub fn to_number(&self) -> crate::error_types::LuaResult<f64> {
+        use crate::error_types::LuaError;
         match self {
             LuaValue::Number(n) => Ok(*n),
             LuaValue::String(s) => s
                 .trim()
                 .parse::<f64>()
-                .map_err(|_| format!("Cannot convert string '{}' to number", s)),
+                .map_err(|_| LuaError::type_error("number", "string", "to_number")),
             LuaValue::Boolean(true) => Ok(1.0),
             LuaValue::Boolean(false) => Ok(0.0),
-            _ => Err(format!("Cannot convert {:?} to number", self)),
+            _ => Err(LuaError::type_error("number", self.type_name(), "to_number")),
         }
     }
 
