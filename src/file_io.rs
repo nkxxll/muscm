@@ -6,6 +6,7 @@
 //! - Path operations: io.popen (command execution)
 //! - File metadata: io.stat (file information)
 
+use crate::error_types::{LuaError, LuaResult};
 use crate::lua_value::{LuaTable, LuaValue};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -101,15 +102,15 @@ impl FileOperations for AppendFileHandle {
 /// Create io.open(filename, mode) function
 /// Opens a file and returns a file handle
 /// Modes: "r" (read), "w" (write), "a" (append), "rb"/"wb"/"ab" (binary)
-pub fn create_io_open() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_io_open() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         if args.len() < 1 {
-            return Err("io.open() requires at least 1 argument".to_string());
+            return Err(LuaError::arg_count("io.open", 1, args.len()));
         }
 
         let filename = match &args[0] {
             LuaValue::String(s) => s.clone(),
-            _ => return Err("io.open() first argument must be a string".to_string()),
+            _ => return Err(LuaError::type_error("string", args[0].type_name(), "io.open")),
         };
 
         let mode = if args.len() >= 2 {
@@ -132,7 +133,7 @@ pub fn create_io_open() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>>
                     let userdata = Rc::new(RefCell::new(Box::new(fh) as Box<dyn std::any::Any>));
                     Ok(LuaValue::UserData(userdata))
                 }
-                Err(e) => Err(format!("io.open() failed to open {}: {}", filename, e)),
+                Err(e) => Err(LuaError::file(&filename, format!("io.open() failed to open: {}", e))),
             },
             "w" => match File::create(&filename) {
                 Ok(file) => {
@@ -143,7 +144,7 @@ pub fn create_io_open() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>>
                     let userdata = Rc::new(RefCell::new(Box::new(fh) as Box<dyn std::any::Any>));
                     Ok(LuaValue::UserData(userdata))
                 }
-                Err(e) => Err(format!("io.open() failed to create {}: {}", filename, e)),
+                Err(e) => Err(LuaError::file(&filename, format!("io.open() failed to create: {}", e))),
             },
             "a" => match OpenOptions::new().append(true).create(true).open(&filename) {
                 Ok(file) => {
@@ -154,19 +155,19 @@ pub fn create_io_open() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>>
                     let userdata = Rc::new(RefCell::new(Box::new(fh) as Box<dyn std::any::Any>));
                     Ok(LuaValue::UserData(userdata))
                 }
-                Err(e) => Err(format!("io.open() failed to open {}: {}", filename, e)),
+                Err(e) => Err(LuaError::file(&filename, format!("io.open() failed to open: {}", e))),
             },
-            _ => Err(format!("io.open() unsupported mode: {}", mode)),
+            _ => Err(LuaError::value(format!("io.open() unsupported mode: {}", mode))),
         }
     })
 }
 
 /// Create file:read(...) function
 /// Reads from a file handle with various formats
-pub fn create_file_read() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_file_read() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         if args.is_empty() {
-            return Err("file:read() requires at least the file handle".to_string());
+            return Err(LuaError::arg_count("file:read", 1, 0));
         }
 
         // Extract format string (default "l" for line)
@@ -198,33 +199,33 @@ pub fn create_file_read() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String
                                         ))
                                     }
                                 }
-                                Err(e) => Err(format!("file:read() error: {}", e)),
+                                Err(e) => Err(LuaError::runtime(format!("file:read() error: {}", e), "io")),
                             }
                         }
                         "a" => {
                             // Read all
                             match fh.file.as_mut().unwrap().read_all() {
                                 Ok(content) => Ok(LuaValue::String(content)),
-                                Err(e) => Err(format!("file:read() error: {}", e)),
+                                Err(e) => Err(LuaError::runtime(format!("file:read() error: {}", e), "io")),
                             }
                         }
-                        _ => Err(format!("file:read() unsupported format: {}", format)),
+                        _ => Err(LuaError::value(format!("file:read() unsupported format: {}", format))),
                     }
                 } else {
-                    Err("Invalid file handle".to_string())
+                    Err(LuaError::value("Invalid file handle"))
                 }
             }
-            _ => Err("file:read() first argument must be a file handle".to_string()),
+            _ => Err(LuaError::type_error("userdata", args[0].type_name(), "file:read")),
         }
     })
 }
 
 /// Create file:write(...) function
 /// Writes data to a file handle
-pub fn create_file_write() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_file_write() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         if args.is_empty() {
-            return Err("file:write() requires at least the file handle".to_string());
+            return Err(LuaError::arg_count("file:write", 1, 0));
         }
 
         match &args[0] {
@@ -248,26 +249,26 @@ pub fn create_file_write() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, Strin
 
                         match fh.file.as_mut().unwrap().write(&data) {
                             Ok(_) => total_written += data.len(),
-                            Err(e) => return Err(format!("file:write() error: {}", e)),
+                            Err(e) => return Err(LuaError::runtime(format!("file:write() error: {}", e), "io")),
                         }
                     }
 
                     Ok(LuaValue::Number(total_written as f64))
                 } else {
-                    Err("Invalid file handle".to_string())
+                    Err(LuaError::value("Invalid file handle"))
                 }
             }
-            _ => Err("file:write() first argument must be a file handle".to_string()),
+            _ => Err(LuaError::type_error("userdata", args[0].type_name(), "file:write")),
         }
     })
 }
 
 /// Create file:close() function
 /// Closes a file handle
-pub fn create_file_close() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_file_close() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         if args.is_empty() {
-            return Err("file:close() requires the file handle".to_string());
+            return Err(LuaError::arg_count("file:close", 1, 0));
         }
 
         match &args[0] {
@@ -275,14 +276,14 @@ pub fn create_file_close() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, Strin
                 // File will be closed when UserData is dropped (RAII)
                 Ok(LuaValue::Nil)
             }
-            _ => Err("file:close() first argument must be a file handle".to_string()),
+            _ => Err(LuaError::type_error("userdata", args[0].type_name(), "file:close")),
         }
     })
 }
 
 /// Create io.input([filename]) function
 /// Sets or gets the current input file
-pub fn create_io_input() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_io_input() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         if args.is_empty() {
             // Get current input file (stdin placeholder)
@@ -300,9 +301,9 @@ pub fn create_io_input() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>
                             Rc::new(RefCell::new(Box::new(fh) as Box<dyn std::any::Any>));
                         Ok(LuaValue::UserData(userdata))
                     }
-                    Err(e) => Err(format!("io.input() failed: {}", e)),
+                    Err(e) => Err(LuaError::file(filename, format!("io.input() failed: {}", e))),
                 },
-                _ => Err("io.input() argument must be a string".to_string()),
+                _ => Err(LuaError::type_error("string", args[0].type_name(), "io.input")),
             }
         }
     })
@@ -310,7 +311,7 @@ pub fn create_io_input() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>
 
 /// Create io.output([filename]) function
 /// Sets or gets the current output file
-pub fn create_io_output() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_io_output() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         if args.is_empty() {
             // Get current output file (stdout placeholder)
@@ -327,9 +328,9 @@ pub fn create_io_output() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String
                             Rc::new(RefCell::new(Box::new(fh) as Box<dyn std::any::Any>));
                         Ok(LuaValue::UserData(userdata))
                     }
-                    Err(e) => Err(format!("io.output() failed: {}", e)),
+                    Err(e) => Err(LuaError::file(filename, format!("io.output() failed: {}", e))),
                 },
-                _ => Err("io.output() argument must be a string".to_string()),
+                _ => Err(LuaError::type_error("string", args[0].type_name(), "io.output")),
             }
         }
     })
@@ -341,15 +342,15 @@ pub fn create_io_output() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String
 
 /// Create os.execute(command) function
 /// Executes a system command
-pub fn create_os_execute() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_os_execute() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         if args.is_empty() {
-            return Err("os.execute() requires 1 argument".to_string());
+            return Err(LuaError::arg_count("os.execute", 1, 0));
         }
 
         let command = match &args[0] {
             LuaValue::String(s) => s.clone(),
-            _ => return Err("os.execute() argument must be a string".to_string()),
+            _ => return Err(LuaError::type_error("string", args[0].type_name(), "os.execute")),
         };
 
         #[cfg(unix)]
@@ -360,7 +361,7 @@ pub fn create_os_execute() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, Strin
                     let exit_code = status.code().unwrap_or(1) as f64;
                     Ok(LuaValue::Number(exit_code))
                 }
-                Err(e) => Err(format!("os.execute() failed: {}", e)),
+                Err(e) => Err(LuaError::runtime(format!("os.execute() failed: {}", e), "system call")),
             }
         }
 
@@ -372,7 +373,7 @@ pub fn create_os_execute() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, Strin
                     let exit_code = output.status.code().unwrap_or(1) as f64;
                     Ok(LuaValue::Number(exit_code))
                 }
-                Err(e) => Err(format!("os.execute() failed: {}", e)),
+                Err(e) => Err(LuaError::runtime(format!("os.execute() failed: {}", e), "system call")),
             }
         }
     })
@@ -380,7 +381,7 @@ pub fn create_os_execute() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, Strin
 
 /// Create os.exit([code]) function
 /// Exits the program with optional exit code
-pub fn create_os_exit() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_os_exit() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         let code = if !args.is_empty() {
             match &args[0] {
@@ -397,15 +398,15 @@ pub fn create_os_exit() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>>
 
 /// Create os.getenv(name) function
 /// Gets an environment variable
-pub fn create_os_getenv() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_os_getenv() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         if args.is_empty() {
-            return Err("os.getenv() requires 1 argument".to_string());
+            return Err(LuaError::arg_count("os.getenv", 1, 0));
         }
 
         let var_name = match &args[0] {
             LuaValue::String(s) => s.clone(),
-            _ => return Err("os.getenv() argument must be a string".to_string()),
+            _ => return Err(LuaError::type_error("string", args[0].type_name(), "os.getenv")),
         };
 
         match std::env::var(&var_name) {
@@ -417,20 +418,20 @@ pub fn create_os_getenv() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String
 
 /// Create os.setenv(name, value) function
 /// Sets an environment variable
-pub fn create_os_setenv() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_os_setenv() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         if args.len() < 2 {
-            return Err("os.setenv() requires 2 arguments".to_string());
+            return Err(LuaError::arg_count("os.setenv", 2, args.len()));
         }
 
         let var_name = match &args[0] {
             LuaValue::String(s) => s.clone(),
-            _ => return Err("os.setenv() first argument must be a string".to_string()),
+            _ => return Err(LuaError::type_error("string", args[0].type_name(), "os.setenv")),
         };
 
         let var_value = match &args[1] {
             LuaValue::String(s) => s.clone(),
-            _ => return Err("os.setenv() second argument must be a string".to_string()),
+            _ => return Err(LuaError::type_error("string", args[1].type_name(), "os.setenv")),
         };
 
         std::env::set_var(&var_name, &var_value);
@@ -441,16 +442,16 @@ pub fn create_os_setenv() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String
 /// Create os.time([table]) function
 /// Returns the current time in seconds since epoch
 /// If table is provided, returns time for that date
-pub fn create_os_time() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_os_time() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|_args| match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => Ok(LuaValue::Number(duration.as_secs() as f64)),
-        Err(_) => Err("os.time() failed to get system time".to_string()),
+        Err(_) => Err(LuaError::runtime("os.time() failed to get system time", "system")),
     })
 }
 
 /// Create os.clock() function
 /// Returns CPU time used by the program in seconds
-pub fn create_os_clock() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_os_clock() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|_args| {
         // Simplified: return a dummy value since we don't have CPU time info
         // In a real implementation, use platform-specific functions
@@ -460,52 +461,52 @@ pub fn create_os_clock() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>
 
 /// Create os.remove(filename) function
 /// Deletes a file
-pub fn create_os_remove() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_os_remove() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         if args.is_empty() {
-            return Err("os.remove() requires 1 argument".to_string());
+            return Err(LuaError::arg_count("os.remove", 1, 0));
         }
 
         let filename = match &args[0] {
             LuaValue::String(s) => s.clone(),
-            _ => return Err("os.remove() argument must be a string".to_string()),
+            _ => return Err(LuaError::type_error("string", args[0].type_name(), "os.remove")),
         };
 
         match fs::remove_file(&filename) {
             Ok(_) => Ok(LuaValue::Nil),
-            Err(e) => Err(format!("os.remove() failed: {}", e)),
+            Err(e) => Err(LuaError::file(&filename, format!("os.remove() failed: {}", e))),
         }
     })
 }
 
 /// Create os.rename(oldname, newname) function
 /// Renames or moves a file
-pub fn create_os_rename() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_os_rename() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         if args.len() < 2 {
-            return Err("os.rename() requires 2 arguments".to_string());
+            return Err(LuaError::arg_count("os.rename", 2, args.len()));
         }
 
         let oldname = match &args[0] {
             LuaValue::String(s) => s.clone(),
-            _ => return Err("os.rename() first argument must be a string".to_string()),
+            _ => return Err(LuaError::type_error("string", args[0].type_name(), "os.rename")),
         };
 
         let newname = match &args[1] {
             LuaValue::String(s) => s.clone(),
-            _ => return Err("os.rename() second argument must be a string".to_string()),
+            _ => return Err(LuaError::type_error("string", args[1].type_name(), "os.rename")),
         };
 
         match fs::rename(&oldname, &newname) {
             Ok(_) => Ok(LuaValue::Nil),
-            Err(e) => Err(format!("os.rename() failed: {}", e)),
+            Err(e) => Err(LuaError::file(&oldname, format!("os.rename() failed: {}", e))),
         }
     })
 }
 
 /// Create os.tmpname() function
 /// Returns a temporary filename
-pub fn create_os_tmpname() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_os_tmpname() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|_args| {
         let tmp_dir = std::env::temp_dir();
         let filename = format!(
@@ -522,20 +523,20 @@ pub fn create_os_tmpname() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, Strin
 
 /// Create os.difftime(t2, t1) function
 /// Returns the difference in seconds between two timestamps
-pub fn create_os_difftime() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_os_difftime() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         if args.len() < 2 {
-            return Err("os.difftime() requires 2 arguments".to_string());
+            return Err(LuaError::arg_count("os.difftime", 2, args.len()));
         }
 
         let t2 = match &args[0] {
             LuaValue::Number(n) => *n,
-            _ => return Err("os.difftime() arguments must be numbers".to_string()),
+            _ => return Err(LuaError::type_error("number", args[0].type_name(), "os.difftime")),
         };
 
         let t1 = match &args[1] {
             LuaValue::Number(n) => *n,
-            _ => return Err("os.difftime() arguments must be numbers".to_string()),
+            _ => return Err(LuaError::type_error("number", args[1].type_name(), "os.difftime")),
         };
 
         Ok(LuaValue::Number(t2 - t1))
@@ -632,10 +633,11 @@ pub fn create_enhanced_io_table() -> LuaValue {
     io_table.insert(
         LuaValue::String("read".to_string()),
         LuaValue::Function(Rc::new(LuaFunction::Builtin(Rc::new(|_args| {
+            use crate::error_types::LuaError;
             let mut line = String::new();
             match io::stdin().read_line(&mut line) {
                 Ok(_) => Ok(LuaValue::String(line.trim_end_matches('\n').to_string())),
-                Err(e) => Err(format!("io.read() error: {}", e)),
+                Err(e) => Err(LuaError::file("stdin", format!("io.read() error: {}", e))),
             }
         })))),
     );

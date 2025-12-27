@@ -1,4 +1,5 @@
 use super::validation;
+use crate::error_types::LuaResult;
 use crate::lua_value::LuaTable;
 /// String library functions for Lua
 use crate::lua_value::LuaValue;
@@ -7,7 +8,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 /// Create string.len() function
-pub fn create_string_len() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_string_len() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         validation::require_args("string.len", &args, 1, Some(1))?;
         let s = validation::get_string("string.len", 0, &args[0])?;
@@ -16,27 +17,15 @@ pub fn create_string_len() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, Strin
 }
 
 /// Create string.sub() function
-pub fn create_string_sub() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_string_sub() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
-        if args.len() < 2 {
-            return Err("string.sub() requires at least 2 arguments".to_string());
-        }
+        validation::require_args("string.sub", &args, 2, None)?;
 
-        let s = match &args[0] {
-            LuaValue::String(s) => s.clone(),
-            _ => return Err(format!("string.sub() expects string as first argument")),
-        };
-
-        let start_lua = match &args[1] {
-            LuaValue::Number(n) => *n as i32,
-            _ => return Err("string.sub() expects number as second argument".to_string()),
-        };
+        let s = validation::get_string("string.sub", 0, &args[0])?;
+        let start_lua = validation::get_integer("string.sub", 1, &args[1])? as i32;
 
         let end_lua = if args.len() >= 3 {
-            match &args[2] {
-                LuaValue::Number(n) => *n as i32,
-                _ => return Err("string.sub() expects number as third argument".to_string()),
-            }
+            validation::get_integer("string.sub", 2, &args[2])? as i32
         } else {
             s.len() as i32
         };
@@ -68,7 +57,7 @@ pub fn create_string_sub() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, Strin
 }
 
 /// Create string.upper() function
-pub fn create_string_upper() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_string_upper() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         validation::require_args("string.upper", &args, 1, Some(1))?;
         let s = validation::get_string("string.upper", 0, &args[0])?;
@@ -77,7 +66,7 @@ pub fn create_string_upper() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, Str
 }
 
 /// Create string.lower() function
-pub fn create_string_lower() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_string_lower() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         validation::require_args("string.lower", &args, 1, Some(1))?;
         let s = validation::get_string("string.lower", 0, &args[0])?;

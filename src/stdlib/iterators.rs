@@ -1,11 +1,12 @@
 use super::validation;
+use crate::error_types::LuaResult;
 use crate::lua_value::LuaFunction;
 /// Iterator functions for Lua
 use crate::lua_value::LuaValue;
 use std::rc::Rc;
 
 /// Create pairs() iterator function
-pub fn create_pairs() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_pairs() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|_args| {
         // Return a dummy function for now - full iterator support in future
         Ok(LuaValue::Function(Rc::new(LuaFunction::Builtin(Rc::new(
@@ -15,7 +16,7 @@ pub fn create_pairs() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
 }
 
 /// Create ipairs() iterator function
-pub fn create_ipairs() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_ipairs() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|_args| {
         // Return a dummy function for now - full iterator support in future
         Ok(LuaValue::Function(Rc::new(LuaFunction::Builtin(Rc::new(
@@ -25,7 +26,7 @@ pub fn create_ipairs() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> 
 }
 
 /// Create next() function for generic iteration
-pub fn create_next() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_next() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         validation::require_args("next", &args, 1, Some(2))?;
         let table_ref = validation::get_table("next", 0, &args[0])?;

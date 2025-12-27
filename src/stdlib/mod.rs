@@ -18,11 +18,12 @@ pub mod types;
 /// - require: Module system for loading .lua files
 pub mod validation;
 
+use crate::error_types::{LuaError, LuaResult};
 use crate::lua_value::LuaValue;
 use std::rc::Rc;
 
 /// Create the print function that outputs values to stdout
-pub fn create_print() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_print() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         let output = args
             .iter()
@@ -82,24 +83,24 @@ pub fn create_os_table() -> LuaValue {
 /// Returns the module's exported value or exports table
 pub fn create_require(
     _loader: std::rc::Rc<std::cell::RefCell<crate::module_loader::ModuleLoader>>,
-) -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+) -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(move |args| {
         if args.is_empty() {
-            return Err("require() needs a module name argument".to_string());
+            return Err(LuaError::arg_count("require", 1, 0));
         }
 
         let module_name = match &args[0] {
             LuaValue::String(s) => s.clone(),
-            _ => return Err("Module name must be a string".to_string()),
+            _ => return Err(LuaError::type_error("string", args[0].type_name(), "require")),
         };
 
         // Note: The actual module loading happens in Executor::execute_call
         // because we need access to the Executor and Interpreter instances.
         // This function is a placeholder that returns an error.
         // The real require() is handled specially in execute_call.
-        Err(format!(
-            "require() must be called through executor, not directly (module: {})",
-            module_name
+        Err(LuaError::module(
+            module_name,
+            "require() must be called through executor, not directly",
         ))
     })
 }

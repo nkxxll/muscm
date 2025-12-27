@@ -1,10 +1,11 @@
 use super::validation;
+use crate::error_types::LuaResult;
 /// Type conversion and type-related functions for Lua
 use crate::lua_value::LuaValue;
 use std::rc::Rc;
 
 /// Create the type() function that returns the type name of a value
-pub fn create_type() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_type() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         validation::require_args("type", &args, 1, Some(1))?;
         Ok(LuaValue::String(args[0].type_name().to_string()))
@@ -12,7 +13,7 @@ pub fn create_type() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
 }
 
 /// Create the tonumber() function that converts strings to numbers
-pub fn create_tonumber() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_tonumber() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         if args.is_empty() {
             return Ok(LuaValue::Nil);
@@ -31,7 +32,7 @@ pub fn create_tonumber() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>
 }
 
 /// Create the tostring() function that converts values to strings
-pub fn create_tostring() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_tostring() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         if args.is_empty() {
             return Ok(LuaValue::String("nil".to_string()));

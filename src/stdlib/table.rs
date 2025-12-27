@@ -1,4 +1,5 @@
 use super::validation;
+use crate::error_types::LuaResult;
 use crate::lua_value::LuaTable;
 /// Table library functions for Lua
 use crate::lua_value::LuaValue;
@@ -7,7 +8,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 /// Create table.insert() function
-pub fn create_table_insert() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_table_insert() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         validation::require_args("table.insert", &args, 2, None)?;
         let table_ref = validation::get_table("table.insert", 0, &args[0])?;
@@ -39,7 +40,7 @@ pub fn create_table_insert() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, Str
 }
 
 /// Create table.remove() function
-pub fn create_table_remove() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_table_remove() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         validation::require_args("table.remove", &args, 1, Some(2))?;
         let table_ref = validation::get_table("table.remove", 0, &args[0])?;

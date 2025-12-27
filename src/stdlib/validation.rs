@@ -2,6 +2,7 @@
 ///
 /// Provides consistent argument validation and type checking
 /// to eliminate ~150 lines of duplicated boilerplate across stdlib.
+use crate::error_types::{LuaError, LuaResult};
 use crate::lua_value::{LuaTable, LuaValue};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -18,26 +19,14 @@ pub fn require_args(
     args: &[LuaValue],
     min: usize,
     max: Option<usize>,
-) -> Result<(), String> {
+) -> LuaResult<()> {
     if args.len() < min {
-        return Err(format!(
-            "{}() expects at least {} argument{}, got {}",
-            name,
-            min,
-            if min == 1 { "" } else { "s" },
-            args.len()
-        ));
+        return Err(LuaError::arg_count(name, min, args.len()));
     }
 
     if let Some(max_args) = max {
         if args.len() > max_args {
-            return Err(format!(
-                "{}() expects at most {} argument{}, got {}",
-                name,
-                max_args,
-                if max_args == 1 { "" } else { "s" },
-                args.len()
-            ));
+            return Err(LuaError::arg_count(name, max_args, args.len()));
         }
     }
 
@@ -56,16 +45,10 @@ pub fn require_type(
     index: usize,
     arg: &LuaValue,
     expected: &str,
-) -> Result<(), String> {
+) -> LuaResult<()> {
     let got = arg.type_name();
     if got != expected {
-        Err(format!(
-            "{}() expects {} as argument {}, got {}",
-            name,
-            expected,
-            index + 1,
-            got
-        ))
+        Err(LuaError::type_error(expected, got, name))
     } else {
         Ok(())
     }
@@ -77,15 +60,10 @@ pub fn require_type(
 /// * `name` - Function name for error messages
 /// * `index` - Argument position (0-based)
 /// * `arg` - The argument to extract
-pub fn get_number(name: &str, index: usize, arg: &LuaValue) -> Result<f64, String> {
+pub fn get_number(name: &str, index: usize, arg: &LuaValue) -> LuaResult<f64> {
     match arg {
         LuaValue::Number(n) => Ok(*n),
-        _ => Err(format!(
-            "{}() expects number as argument {}, got {}",
-            name,
-            index + 1,
-            arg.type_name()
-        )),
+        _ => Err(LuaError::type_error("number", arg.type_name(), name)),
     }
 }
 
@@ -95,15 +73,10 @@ pub fn get_number(name: &str, index: usize, arg: &LuaValue) -> Result<f64, Strin
 /// * `name` - Function name for error messages
 /// * `index` - Argument position (0-based)
 /// * `arg` - The argument to extract
-pub fn get_string(name: &str, index: usize, arg: &LuaValue) -> Result<String, String> {
+pub fn get_string(name: &str, index: usize, arg: &LuaValue) -> LuaResult<String> {
     match arg {
         LuaValue::String(s) => Ok(s.clone()),
-        _ => Err(format!(
-            "{}() expects string as argument {}, got {}",
-            name,
-            index + 1,
-            arg.type_name()
-        )),
+        _ => Err(LuaError::type_error("string", arg.type_name(), name)),
     }
 }
 
@@ -117,15 +90,10 @@ pub fn get_table(
     name: &str,
     index: usize,
     arg: &LuaValue,
-) -> Result<Rc<RefCell<LuaTable>>, String> {
+) -> LuaResult<Rc<RefCell<LuaTable>>> {
     match arg {
         LuaValue::Table(t) => Ok(t.clone()),
-        _ => Err(format!(
-            "{}() expects table as argument {}, got {}",
-            name,
-            index + 1,
-            arg.type_name()
-        )),
+        _ => Err(LuaError::type_error("table", arg.type_name(), name)),
     }
 }
 
@@ -135,15 +103,10 @@ pub fn get_table(
 /// * `name` - Function name for error messages
 /// * `index` - Argument position (0-based)
 /// * `arg` - The argument to extract
-pub fn get_boolean(name: &str, index: usize, arg: &LuaValue) -> Result<bool, String> {
+pub fn get_boolean(name: &str, index: usize, arg: &LuaValue) -> LuaResult<bool> {
     match arg {
         LuaValue::Boolean(b) => Ok(*b),
-        _ => Err(format!(
-            "{}() expects boolean as argument {}, got {}",
-            name,
-            index + 1,
-            arg.type_name()
-        )),
+        _ => Err(LuaError::type_error("boolean", arg.type_name(), name)),
     }
 }
 
@@ -153,14 +116,9 @@ pub fn get_boolean(name: &str, index: usize, arg: &LuaValue) -> Result<bool, Str
 /// * `name` - Function name for error messages
 /// * `index` - Argument position (0-based)
 /// * `arg` - The argument to extract
-pub fn get_integer(name: &str, index: usize, arg: &LuaValue) -> Result<i64, String> {
+pub fn get_integer(name: &str, index: usize, arg: &LuaValue) -> LuaResult<i64> {
     match arg {
         LuaValue::Number(n) => Ok(*n as i64),
-        _ => Err(format!(
-            "{}() expects number as argument {}, got {}",
-            name,
-            index + 1,
-            arg.type_name()
-        )),
+        _ => Err(LuaError::type_error("number", arg.type_name(), name)),
     }
 }

@@ -1,5 +1,6 @@
 use crate::lua_value::{LuaTable, LuaValue};
 use crate::module_loader::ModuleLoader;
+use crate::scope_manager::ScopeManager;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -85,8 +86,10 @@ impl Default for ValueStack {
 pub struct LuaInterpreter {
     /// Global variables
     pub globals: HashMap<String, LuaValue>,
-    /// Stack of local scopes
+    /// Stack of local scopes (managed via ScopeManager)
     pub scope_stack: Vec<HashMap<String, LuaValue>>,
+    /// Scope manager for encapsulated scope operations
+    pub scope_manager: ScopeManager,
     /// Call stack for function calls
     pub call_stack: Vec<CallFrame>,
     /// Value stack for temporary computation
@@ -112,6 +115,7 @@ impl LuaInterpreter {
         let mut interpreter = LuaInterpreter {
             globals: HashMap::new(),
             scope_stack: Vec::new(),
+            scope_manager: ScopeManager::new(),
             call_stack: Vec::new(),
             value_stack: ValueStack::new(),
             reachable_objects: HashSet::new(),
@@ -236,11 +240,23 @@ impl LuaInterpreter {
     /// Push a new scope for block statements or function calls
     pub fn push_scope(&mut self) {
         self.scope_stack.push(HashMap::new());
+        self.scope_manager.push();
     }
 
     /// Pop the current scope
     pub fn pop_scope(&mut self) {
         self.scope_stack.pop();
+        let _ = self.scope_manager.pop();
+    }
+
+    /// Get a reference to the scope manager
+    pub fn scope_manager(&self) -> &ScopeManager {
+        &self.scope_manager
+    }
+
+    /// Get a mutable reference to the scope manager
+    pub fn scope_manager_mut(&mut self) -> &mut ScopeManager {
+        &mut self.scope_manager
     }
 
     /// Push a call frame for function call context

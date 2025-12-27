@@ -858,21 +858,24 @@ impl Executor {
         args: Vec<LuaValue>,
         interp: &mut LuaInterpreter,
     ) -> Result<LuaValue, String> {
+        use crate::error_types::LuaError;
+
         match func {
             LuaValue::Function(f) => match f.as_ref() {
                 crate::lua_value::LuaFunction::Builtin(builtin) => {
                     // Try to call the builtin
                     match builtin(args.clone()) {
                         // If require() needs special handling, extract module name from error
-                        Err(err) if err.contains("require() must be called through executor") => {
-                            if args.len() == 1 {
-                                if let LuaValue::String(module_name) = &args[0] {
-                                    return self.execute_require(module_name, interp);
+                        Err(err) if matches!(err, LuaError::ModuleError { .. }) => {
+                            if let LuaError::ModuleError { module, reason } = &err {
+                                if reason.contains("require() must be called through executor") {
+                                    return self.execute_require(module, interp);
                                 }
                             }
-                            Err(err)
+                            Err(err.message())
                         }
-                        result => result,
+                        Ok(val) => Ok(val),
+                        Err(err) => Err(err.message()),
                     }
                 }
                 crate::lua_value::LuaFunction::User {
@@ -2276,7 +2279,8 @@ mod tests {
             if let crate::lua_value::LuaFunction::Builtin(builtin) = f.as_ref() {
                 let result = builtin(vec![LuaValue::String("test error".to_string())]);
                 assert!(result.is_err());
-                assert_eq!(result.unwrap_err(), "test error");
+                let err = result.unwrap_err();
+                assert_eq!(err.message(), "test error");
             }
         }
     }

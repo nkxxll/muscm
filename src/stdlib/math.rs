@@ -1,4 +1,5 @@
 use super::validation;
+use crate::error_types::{LuaError, LuaResult};
 use crate::lua_value::LuaTable;
 /// Math library functions for Lua
 use crate::lua_value::LuaValue;
@@ -7,7 +8,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 /// Create math.abs() function
-pub fn create_math_abs() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_math_abs() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         validation::require_args("math.abs", &args, 1, Some(1))?;
         let n = validation::get_number("math.abs", 0, &args[0])?;
@@ -16,7 +17,7 @@ pub fn create_math_abs() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>
 }
 
 /// Create math.floor() function
-pub fn create_math_floor() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_math_floor() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         validation::require_args("math.floor", &args, 1, Some(1))?;
         let n = validation::get_number("math.floor", 0, &args[0])?;
@@ -25,7 +26,7 @@ pub fn create_math_floor() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, Strin
 }
 
 /// Create math.ceil() function
-pub fn create_math_ceil() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_math_ceil() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         validation::require_args("math.ceil", &args, 1, Some(1))?;
         let n = validation::get_number("math.ceil", 0, &args[0])?;
@@ -34,7 +35,7 @@ pub fn create_math_ceil() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String
 }
 
 /// Create math.min() function
-pub fn create_math_min() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_math_min() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         validation::require_args("math.min", &args, 1, None)?;
         let mut min = validation::get_number("math.min", 0, &args[0])?;
@@ -49,7 +50,7 @@ pub fn create_math_min() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>
 }
 
 /// Create math.max() function
-pub fn create_math_max() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_math_max() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         validation::require_args("math.max", &args, 1, None)?;
         let mut max = validation::get_number("math.max", 0, &args[0])?;
@@ -64,7 +65,7 @@ pub fn create_math_max() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>
 }
 
 /// Create math.random() function
-pub fn create_math_random() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_math_random() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -79,23 +80,19 @@ pub fn create_math_random() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, Stri
 
         match args.len() {
             0 => Ok(LuaValue::Number(normalized)),
-            1 => match &args[0] {
-                LuaValue::Number(n) => {
-                    let max = *n as i64;
-                    Ok(LuaValue::Number(((rand % (max as u64)) + 1) as f64))
-                }
-                _ => Err("math.random() expects a number".to_string()),
-            },
-            2 => match (&args[0], &args[1]) {
-                (LuaValue::Number(a), LuaValue::Number(b)) => {
-                    let min = (*a as i64).min(*b as i64);
-                    let max = (*a as i64).max(*b as i64);
-                    let range = (max - min + 1) as u64;
-                    Ok(LuaValue::Number(((rand % range) + min as u64) as f64))
-                }
-                _ => Err("math.random() expects numbers".to_string()),
-            },
-            _ => Err("math.random() takes 0-2 arguments".to_string()),
+            1 => {
+                let max = validation::get_number("math.random", 0, &args[0])? as i64;
+                Ok(LuaValue::Number(((rand % (max as u64)) + 1) as f64))
+            }
+            2 => {
+                let a = validation::get_number("math.random", 0, &args[0])? as i64;
+                let b = validation::get_number("math.random", 1, &args[1])? as i64;
+                let min = a.min(b);
+                let max = a.max(b);
+                let range = (max - min + 1) as u64;
+                Ok(LuaValue::Number(((rand % range) + min as u64) as f64))
+            }
+            _ => Err(LuaError::arg_count("math.random", 2, args.len())),
         }
     })
 }

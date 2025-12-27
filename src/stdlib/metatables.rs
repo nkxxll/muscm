@@ -1,4 +1,5 @@
 use super::validation;
+use crate::error_types::{LuaError, LuaResult};
 use crate::lua_value::LuaTable;
 /// Metatable and error handling functions for Lua
 use crate::lua_value::LuaValue;
@@ -8,7 +9,7 @@ use std::rc::Rc;
 
 /// Create the setmetatable() function
 /// Sets or replaces the metatable for a table
-pub fn create_setmetatable() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_setmetatable() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         validation::require_args("setmetatable", &args, 2, Some(2))?;
         let table = validation::get_table("setmetatable", 0, &args[0])?;
@@ -33,14 +34,14 @@ pub fn create_setmetatable() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, Str
                 table.borrow_mut().metatable = None;
                 Ok(args[0].clone())
             }
-            _ => Err("setmetatable() second argument must be a table or nil".to_string()),
+            _ => Err(LuaError::type_error("table or nil", args[1].type_name(), "setmetatable")),
         }
     })
 }
 
 /// Create the getmetatable() function
 /// Returns the metatable of a table
-pub fn create_getmetatable() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_getmetatable() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         validation::require_args("getmetatable", &args, 1, Some(1))?;
 
@@ -69,7 +70,7 @@ pub fn create_getmetatable() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, Str
 
 /// Create the pcall() function
 /// Protected call - calls a function in protected mode, catching errors
-pub fn create_pcall() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_pcall() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         validation::require_args("pcall", &args, 1, None)?;
 
@@ -80,14 +81,14 @@ pub fn create_pcall() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
                 // Return success (true) and nil as placeholder
                 Ok(LuaValue::Boolean(true))
             }
-            _ => Err("pcall() first argument must be a function".to_string()),
+            _ => Err(LuaError::type_error("function", args[0].type_name(), "pcall")),
         }
     })
 }
 
 /// Create the xpcall() function
 /// Extended protected call with custom error handler
-pub fn create_xpcall() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_xpcall() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         validation::require_args("xpcall", &args, 2, None)?;
 
@@ -96,14 +97,17 @@ pub fn create_xpcall() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> 
                 // Return success (true) and nil as placeholder
                 Ok(LuaValue::Boolean(true))
             }
-            _ => Err("xpcall() first two arguments must be functions".to_string()),
+            (LuaValue::Function(_), _) => {
+                Err(LuaError::type_error("function", args[1].type_name(), "xpcall"))
+            }
+            _ => Err(LuaError::type_error("function", args[0].type_name(), "xpcall")),
         }
     })
 }
 
 /// Create the error() function
 /// Throws an error with a message
-pub fn create_error() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
+pub fn create_error() -> Rc<dyn Fn(Vec<LuaValue>) -> LuaResult<LuaValue>> {
     Rc::new(|args| {
         let message = if args.is_empty() {
             "".to_string()
@@ -113,7 +117,7 @@ pub fn create_error() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
                 v => v.to_string(),
             }
         };
-        Err(message)
+        Err(LuaError::user(message, 1))
     })
 }
 
@@ -127,7 +131,7 @@ pub fn create_coroutine_table() -> LuaValue {
     coro_table.insert(
         LuaValue::String("create".to_string()),
         LuaValue::Function(Rc::new(LuaFunction::Builtin(Rc::new(|_| {
-            Err("coroutine.create() requires executor context".to_string())
+            Err(LuaError::runtime("coroutine.create() requires executor context", "coroutine"))
         })))),
     );
 
@@ -135,7 +139,7 @@ pub fn create_coroutine_table() -> LuaValue {
     coro_table.insert(
         LuaValue::String("resume".to_string()),
         LuaValue::Function(Rc::new(LuaFunction::Builtin(Rc::new(|_| {
-            Err("coroutine.resume() requires executor context".to_string())
+            Err(LuaError::runtime("coroutine.resume() requires executor context", "coroutine"))
         })))),
     );
 
@@ -143,7 +147,7 @@ pub fn create_coroutine_table() -> LuaValue {
     coro_table.insert(
         LuaValue::String("yield".to_string()),
         LuaValue::Function(Rc::new(LuaFunction::Builtin(Rc::new(|_| {
-            Err("coroutine.yield() requires executor context".to_string())
+            Err(LuaError::runtime("coroutine.yield() requires executor context", "coroutine"))
         })))),
     );
 
@@ -151,7 +155,7 @@ pub fn create_coroutine_table() -> LuaValue {
     coro_table.insert(
         LuaValue::String("status".to_string()),
         LuaValue::Function(Rc::new(LuaFunction::Builtin(Rc::new(|_| {
-            Err("coroutine.status() requires executor context".to_string())
+            Err(LuaError::runtime("coroutine.status() requires executor context", "coroutine"))
         })))),
     );
 

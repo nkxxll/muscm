@@ -33,7 +33,7 @@ pub struct LuaTable {
 #[derive(Clone)]
 pub enum LuaFunction {
     /// Built-in function with a closure
-    Builtin(Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>>),
+    Builtin(Rc<dyn Fn(Vec<LuaValue>) -> crate::error_types::LuaResult<LuaValue>>),
     /// User-defined function with AST and captured variables
     User {
         /// Function parameters
