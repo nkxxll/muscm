@@ -1,8 +1,7 @@
+use crate::lua_parser::Statement;
 /// Coroutine support for cooperative multitasking
 /// Enables yield/resume patterns for generator-like behavior
-
 use crate::lua_value::LuaValue;
-use crate::lua_parser::Statement;
 use std::collections::HashMap;
 
 /// State of a coroutine
@@ -65,7 +64,10 @@ impl Coroutine {
     /// Resume the coroutine with given arguments
     pub fn resume(&mut self, args: Vec<LuaValue>) -> (bool, Vec<LuaValue>) {
         if self.status == CoroutineStatus::Dead {
-            return (false, vec![LuaValue::String("cannot resume dead coroutine".to_string())]);
+            return (
+                false,
+                vec![LuaValue::String("cannot resume dead coroutine".to_string())],
+            );
         }
 
         if self.status == CoroutineStatus::Suspended {
@@ -74,7 +76,12 @@ impl Coroutine {
             self.status = CoroutineStatus::Running;
             (true, vec![])
         } else {
-            (false, vec![LuaValue::String("cannot resume running coroutine".to_string())])
+            (
+                false,
+                vec![LuaValue::String(
+                    "cannot resume running coroutine".to_string(),
+                )],
+            )
         }
     }
 

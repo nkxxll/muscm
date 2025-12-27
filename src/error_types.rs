@@ -15,10 +15,7 @@ pub enum LuaError {
         column: usize,
     },
     /// Runtime error with execution context
-    RuntimeError {
-        message: String,
-        context: String,
-    },
+    RuntimeError { message: String, context: String },
     /// Type mismatch error
     TypeError {
         expected: String,
@@ -26,35 +23,19 @@ pub enum LuaError {
         function: String,
     },
     /// Value validation error
-    ValueError {
-        message: String,
-    },
+    ValueError { message: String },
     /// File I/O error
-    FileError {
-        path: String,
-        reason: String,
-    },
+    FileError { path: String, reason: String },
     /// Module loading error
-    ModuleError {
-        module: String,
-        reason: String,
-    },
+    ModuleError { module: String, reason: String },
     /// Tokenization error
-    TokenError {
-        message: String,
-        position: usize,
-    },
+    TokenError { message: String, position: usize },
     /// User-raised error (from error() function)
-    UserError {
-        message: String,
-        level: usize,
-    },
+    UserError { message: String, level: usize },
     /// Control flow: break outside loop
     BreakOutsideLoop,
     /// Control flow: goto to undefined label
-    UndefinedLabel {
-        label: String,
-    },
+    UndefinedLabel { label: String },
     /// Function argument count mismatch
     ArgumentCountError {
         function: String,
@@ -69,9 +50,7 @@ pub enum LuaError {
         key_type: String,
     },
     /// Attempt to call non-callable
-    CallError {
-        value_type: String,
-    },
+    CallError { value_type: String },
 }
 
 impl LuaError {
@@ -232,10 +211,7 @@ impl LuaError {
             LuaError::IndexError {
                 indexing_type,
                 key_type,
-            } => format!(
-                "Cannot index {} with {}",
-                indexing_type, key_type
-            ),
+            } => format!("Cannot index {} with {}", indexing_type, key_type),
             LuaError::CallError { value_type } => {
                 format!("Attempt to call {} (not a function)", value_type)
             }

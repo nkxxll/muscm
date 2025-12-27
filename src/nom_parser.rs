@@ -235,7 +235,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore]  // List/Vector parsing disabled - requires Arena support
+    #[ignore] // List/Vector parsing disabled - requires Arena support
     fn test_parse_simple_list() {
         let result = parse("(+ 1 2)").unwrap();
         assert_eq!(result.len(), 1);
@@ -251,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]  // nom_parser tests not maintained
+    #[ignore] // nom_parser tests not maintained
     fn test_parse_atom() {
         let result = parse("hello").unwrap();
         assert_eq!(result.len(), 1);
@@ -259,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]  // nom_parser tests not maintained
+    #[ignore] // nom_parser tests not maintained
     fn test_parse_number() {
         let result = parse("42").unwrap();
         assert_eq!(result.len(), 1);
@@ -267,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]  // nom_parser tests not maintained
+    #[ignore] // nom_parser tests not maintained
     fn test_parse_quote() {
         let result = parse("'hello").unwrap();
         assert_eq!(result.len(), 1);
@@ -280,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]  // nom_parser tests not maintained
+    #[ignore] // nom_parser tests not maintained
     fn test_parse_bool() {
         let result = parse("#t #f").unwrap();
         assert_eq!(result.len(), 2);
@@ -289,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]  // nom_parser tests not maintained
+    #[ignore] // nom_parser tests not maintained
     fn test_parse_string() {
         let result = parse("\"hello world\"").unwrap();
         assert_eq!(result.len(), 1);
@@ -297,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]  // nom_parser tests not maintained
+    #[ignore] // nom_parser tests not maintained
     fn test_parse_nested_list() {
         let result = parse("(define (square x) (* x x))").unwrap();
         assert_eq!(result.len(), 1);
@@ -311,7 +311,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]  // nom_parser tests not maintained
+    #[ignore] // nom_parser tests not maintained
     fn test_parse_vector() {
         let result = parse("#(1 2 3)").unwrap();
         assert_eq!(result.len(), 1);
@@ -325,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]  // nom_parser tests not maintained
+    #[ignore] // nom_parser tests not maintained
     fn test_parse_multiple_exprs() {
         let result = parse("42 hello (+ 1 2)").unwrap();
         assert_eq!(result.len(), 3);
@@ -334,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]  // nom_parser tests not maintained
+    #[ignore] // nom_parser tests not maintained
     fn test_parse_backquote() {
         let result = parse("`(a ,b)").unwrap();
         assert_eq!(result.len(), 1);
@@ -345,7 +345,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]  // nom_parser tests not maintained
+    #[ignore] // nom_parser tests not maintained
     fn test_parse_unquote_splicing() {
         let result = parse("(,@items)").unwrap();
         assert_eq!(result.len(), 1);
@@ -360,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]  // nom_parser tests not maintained
+    #[ignore] // nom_parser tests not maintained
     fn test_parse_scheme_read_file() {
         let input = r#"(define (print-file filename)
           (call-with-input-file filename

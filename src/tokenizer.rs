@@ -57,7 +57,11 @@ pub struct Tokenizer<'a> {
 
 impl<'a> Tokenizer<'a> {
     pub fn new(input: &'a str) -> Self {
-        Tokenizer { input, pos: 0, line: 1 }
+        Tokenizer {
+            input,
+            pos: 0,
+            line: 1,
+        }
     }
 
     fn peek(&self) -> Option<u8> {
@@ -125,7 +129,7 @@ impl<'a> Tokenizer<'a> {
                     return Token {
                         token_type: TokenType::LParen,
                         start: start_pos,
-                    end: self.pos,
+                        end: self.pos,
                         line: start_line,
                         literal: "(".to_string(),
                     };
@@ -135,7 +139,7 @@ impl<'a> Tokenizer<'a> {
                     return Token {
                         token_type: TokenType::RParen,
                         start: start_pos,
-                    end: self.pos,
+                        end: self.pos,
                         line: start_line,
                         literal: ")".to_string(),
                     };
@@ -145,7 +149,7 @@ impl<'a> Tokenizer<'a> {
                     return Token {
                         token_type: TokenType::Quote,
                         start: start_pos,
-                    end: self.pos,
+                        end: self.pos,
                         line: start_line,
                         literal: "'".to_string(),
                     };
@@ -155,7 +159,7 @@ impl<'a> Tokenizer<'a> {
                     return Token {
                         token_type: TokenType::BQuote,
                         start: start_pos,
-                    end: self.pos,
+                        end: self.pos,
                         line: start_line,
                         literal: "`".to_string(),
                     };
@@ -165,7 +169,7 @@ impl<'a> Tokenizer<'a> {
                     return Token {
                         token_type: TokenType::DQuote,
                         start: start_pos,
-                    end: self.pos,
+                        end: self.pos,
                         line: start_line,
                         literal: "\"".to_string(),
                     };
@@ -178,7 +182,7 @@ impl<'a> Tokenizer<'a> {
                             return Token {
                                 token_type: TokenType::Dot,
                                 start: start_pos,
-                    end: self.pos,
+                                end: self.pos,
                                 line: start_line,
                                 literal: ".".to_string(),
                             };
@@ -190,7 +194,7 @@ impl<'a> Tokenizer<'a> {
                             return Token {
                                 token_type: TokenType::Atom,
                                 start: start_pos,
-                    end: self.pos,
+                                end: self.pos,
                                 line: start_line,
                                 literal,
                             };
@@ -199,7 +203,7 @@ impl<'a> Tokenizer<'a> {
                             return Token {
                                 token_type: TokenType::Dot,
                                 start: start_pos,
-                    end: self.pos,
+                                end: self.pos,
                                 line: start_line,
                                 literal: ".".to_string(),
                             };
@@ -225,7 +229,7 @@ impl<'a> Tokenizer<'a> {
                         return Token {
                             token_type: TokenType::AtMark,
                             start: start_pos,
-                    end: self.pos,
+                            end: self.pos,
                             line: start_line,
                             literal: ",@".to_string(),
                         };
@@ -233,7 +237,7 @@ impl<'a> Tokenizer<'a> {
                         return Token {
                             token_type: TokenType::Comma,
                             start: start_pos,
-                    end: self.pos,
+                            end: self.pos,
                             line: start_line,
                             literal: ",".to_string(),
                         };
@@ -247,7 +251,7 @@ impl<'a> Tokenizer<'a> {
                             return Token {
                                 token_type: TokenType::Vec,
                                 start: start_pos,
-                    end: self.pos,
+                                end: self.pos,
                                 line: start_line,
                                 literal: "#(".to_string(),
                             };
@@ -273,7 +277,7 @@ impl<'a> Tokenizer<'a> {
                             return Token {
                                 token_type: TokenType::SharpConst,
                                 start: start_pos,
-                    end: self.pos,
+                                end: self.pos,
                                 line: start_line,
                                 literal,
                             };
@@ -282,7 +286,7 @@ impl<'a> Tokenizer<'a> {
                             return Token {
                                 token_type: TokenType::Sharp,
                                 start: start_pos,
-                    end: self.pos,
+                                end: self.pos,
                                 line: start_line,
                                 literal: "#".to_string(),
                             };
@@ -296,7 +300,7 @@ impl<'a> Tokenizer<'a> {
                     return Token {
                         token_type: TokenType::Atom,
                         start: start_pos,
-                    end: self.pos,
+                        end: self.pos,
                         line: start_line,
                         literal,
                     };
@@ -305,7 +309,7 @@ impl<'a> Tokenizer<'a> {
                     return Token {
                         token_type: TokenType::Eof,
                         start: self.pos,
-                    end: self.pos,
+                        end: self.pos,
                         line: self.line,
                         literal: String::new(),
                     };
@@ -510,7 +514,10 @@ mod tests {
     #[test]
     fn test_atom_with_numbers() {
         let tokens = tokenize_string("(list 42 3.14 -17)");
-        let atom_count = tokens.iter().filter(|t| t.token_type == TokenType::Atom).count();
+        let atom_count = tokens
+            .iter()
+            .filter(|t| t.token_type == TokenType::Atom)
+            .count();
         assert_eq!(atom_count, 4); // list, 42, 3.14, -17
     }
 

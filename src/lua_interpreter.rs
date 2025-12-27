@@ -1,9 +1,9 @@
-use crate::lua_value::{LuaValue, LuaTable};
+use crate::lua_value::{LuaTable, LuaValue};
 use crate::module_loader::ModuleLoader;
-use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::rc::Rc;
 
 /// A call frame representing a function call context
 #[derive(Debug, Clone)]
@@ -47,9 +47,7 @@ pub struct ValueStack {
 
 impl ValueStack {
     pub fn new() -> Self {
-        ValueStack {
-            values: Vec::new(),
-        }
+        ValueStack { values: Vec::new() }
     }
 
     pub fn push(&mut self, value: LuaValue) {
@@ -110,7 +108,7 @@ impl LuaInterpreter {
     /// Create a new interpreter with custom max recursion depth
     pub fn with_max_depth(max_depth: usize) -> Self {
         let module_loader = ModuleLoader::new();
-        
+
         let mut interpreter = LuaInterpreter {
             globals: HashMap::new(),
             scope_stack: Vec::new(),
@@ -136,114 +134,102 @@ impl LuaInterpreter {
     fn init_stdlib(&mut self) {
         use crate::lua_value::LuaFunction;
         use crate::stdlib;
-        
+
         // Global I/O functions
         self.globals.insert(
             "print".to_string(),
             LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_print()))),
         );
-        
+
         // Global type functions
         self.globals.insert(
             "type".to_string(),
             LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_type()))),
         );
-        
+
         self.globals.insert(
             "tonumber".to_string(),
             LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_tonumber()))),
         );
-        
+
         self.globals.insert(
             "tostring".to_string(),
             LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_tostring()))),
         );
-        
+
         // Global iteration functions
         self.globals.insert(
             "pairs".to_string(),
             LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_pairs()))),
         );
-        
+
         self.globals.insert(
             "ipairs".to_string(),
             LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_ipairs()))),
         );
-        
+
         self.globals.insert(
             "next".to_string(),
             LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_next()))),
         );
-        
+
         // String table
-        self.globals.insert(
-            "string".to_string(),
-            stdlib::create_string_table(),
-        );
-        
+        self.globals
+            .insert("string".to_string(), stdlib::create_string_table());
+
         // Math table
-        self.globals.insert(
-            "math".to_string(),
-            stdlib::create_math_table(),
-        );
-        
+        self.globals
+            .insert("math".to_string(), stdlib::create_math_table());
+
         // Table table
-        self.globals.insert(
-            "table".to_string(),
-            stdlib::create_table_table(),
-        );
-        
+        self.globals
+            .insert("table".to_string(), stdlib::create_table_table());
+
         // I/O table
-        self.globals.insert(
-            "io".to_string(),
-            stdlib::create_io_table(),
-        );
-        
+        self.globals
+            .insert("io".to_string(), stdlib::create_io_table());
+
         // Phase 7: Metatables
         self.globals.insert(
             "setmetatable".to_string(),
             LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_setmetatable()))),
         );
-        
+
         self.globals.insert(
             "getmetatable".to_string(),
             LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_getmetatable()))),
         );
-        
+
         // Phase 7: Error Handling
         self.globals.insert(
             "pcall".to_string(),
             LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_pcall()))),
         );
-        
+
         self.globals.insert(
             "xpcall".to_string(),
             LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_xpcall()))),
         );
-        
+
         self.globals.insert(
             "error".to_string(),
             LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_error()))),
         );
-        
+
         // Phase 7: Coroutines
-        self.globals.insert(
-            "coroutine".to_string(),
-            stdlib::create_coroutine_table(),
-        );
-        
+        self.globals
+            .insert("coroutine".to_string(), stdlib::create_coroutine_table());
+
         // Phase 8: File I/O & System Integration
-        self.globals.insert(
-            "os".to_string(),
-            stdlib::create_os_table(),
-        );
-        
+        self.globals
+            .insert("os".to_string(), stdlib::create_os_table());
+
         // Phase 9: Module System
         self.globals.insert(
             "require".to_string(),
-            LuaValue::Function(Rc::new(LuaFunction::Builtin(
-                stdlib::create_require(Rc::clone(&self.module_loader)),
-            ))),
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_require(
+                Rc::clone(&self.module_loader),
+            )))),
         );
     }
 
@@ -260,24 +246,36 @@ impl LuaInterpreter {
     /// Push a call frame for function call context
     pub fn push_call_frame(&mut self, func_name: String) -> Result<(), String> {
         if self.call_stack.len() >= self.max_call_depth {
-            return Err(format!("Maximum call depth {} exceeded", self.max_call_depth));
+            return Err(format!(
+                "Maximum call depth {} exceeded",
+                self.max_call_depth
+            ));
         }
         self.call_stack.push(CallFrame::new(func_name));
         Ok(())
     }
 
     /// Push a call frame with expected return count
-    pub fn push_call_frame_with_returns(&mut self, func_name: String, expected_returns: i32) -> Result<(), String> {
+    pub fn push_call_frame_with_returns(
+        &mut self,
+        func_name: String,
+        expected_returns: i32,
+    ) -> Result<(), String> {
         if self.call_stack.len() >= self.max_call_depth {
-            return Err(format!("Maximum call depth {} exceeded", self.max_call_depth));
+            return Err(format!(
+                "Maximum call depth {} exceeded",
+                self.max_call_depth
+            ));
         }
-        self.call_stack.push(CallFrame::with_returns(func_name, expected_returns));
+        self.call_stack
+            .push(CallFrame::with_returns(func_name, expected_returns));
         Ok(())
     }
 
     /// Pop the current call frame and get its return values
     pub fn pop_call_frame(&mut self) -> Vec<LuaValue> {
-        self.call_stack.pop()
+        self.call_stack
+            .pop()
             .map(|frame| frame.return_values)
             .unwrap_or_default()
     }
@@ -425,7 +423,8 @@ impl LuaInterpreter {
         let mut size = std::mem::size_of::<Self>();
 
         // Approximate size of globals
-        size += self.globals.len() * (std::mem::size_of::<String>() + std::mem::size_of::<LuaValue>());
+        size +=
+            self.globals.len() * (std::mem::size_of::<String>() + std::mem::size_of::<LuaValue>());
 
         // Approximate size of scopes
         for scope in &self.scope_stack {
@@ -531,7 +530,9 @@ mod tests {
     #[test]
     fn test_call_frame_returns() {
         let mut interp = LuaInterpreter::new();
-        assert!(interp.push_call_frame_with_returns("test_func".to_string(), 2).is_ok());
+        assert!(interp
+            .push_call_frame_with_returns("test_func".to_string(), 2)
+            .is_ok());
 
         interp.set_return_values(vec![LuaValue::Number(10.0), LuaValue::Number(20.0)]);
         let returns = interp.pop_call_frame();
@@ -553,10 +554,10 @@ mod tests {
     fn test_garbage_collection() {
         let mut interp = LuaInterpreter::new();
         let table = interp.create_table();
-        
+
         interp.define("my_table".to_string(), table.clone());
         interp.collect_garbage();
-        
+
         // Table should be marked as reachable
         assert!(!interp.reachable_objects.is_empty());
     }
@@ -565,10 +566,10 @@ mod tests {
     fn test_memory_usage() {
         let mut interp = LuaInterpreter::new();
         let initial = interp.memory_usage();
-        
+
         interp.define("x".to_string(), LuaValue::Number(42.0));
         let after_define = interp.memory_usage();
-        
+
         assert!(after_define > initial);
     }
 }

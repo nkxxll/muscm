@@ -1,7 +1,7 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
-use std::cell::RefCell;
 
 /// Runtime value representation for Lua
 #[derive(Clone)]
@@ -140,10 +140,10 @@ impl LuaValue {
     pub fn to_number(&self) -> Result<f64, String> {
         match self {
             LuaValue::Number(n) => Ok(*n),
-            LuaValue::String(s) => {
-                s.trim().parse::<f64>()
-                    .map_err(|_| format!("Cannot convert string '{}' to number", s))
-            }
+            LuaValue::String(s) => s
+                .trim()
+                .parse::<f64>()
+                .map_err(|_| format!("Cannot convert string '{}' to number", s)),
             LuaValue::Boolean(true) => Ok(1.0),
             LuaValue::Boolean(false) => Ok(0.0),
             _ => Err(format!("Cannot convert {:?} to number", self)),

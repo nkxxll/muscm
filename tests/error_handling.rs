@@ -57,7 +57,10 @@ fn test_file_error_path_info() {
 
 #[test]
 fn test_module_error_circular_dependency() {
-    let err = LuaError::module("moduleA", "circular dependency: moduleA -> moduleB -> moduleA");
+    let err = LuaError::module(
+        "moduleA",
+        "circular dependency: moduleA -> moduleB -> moduleA",
+    );
     assert_eq!(err.category(), "module");
     assert!(err.message().contains("moduleA"));
     assert!(err.message().contains("circular"));

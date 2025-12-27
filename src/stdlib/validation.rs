@@ -1,20 +1,24 @@
 /// Validation helpers for stdlib functions
-/// 
+///
 /// Provides consistent argument validation and type checking
 /// to eliminate ~150 lines of duplicated boilerplate across stdlib.
-
-use crate::lua_value::{LuaValue, LuaTable};
-use std::rc::Rc;
+use crate::lua_value::{LuaTable, LuaValue};
 use std::cell::RefCell;
+use std::rc::Rc;
 
 /// Validate argument count with optional bounds
-/// 
+///
 /// # Arguments
 /// * `name` - Function name for error messages
 /// * `args` - Arguments array
 /// * `min` - Minimum required arguments
 /// * `max` - Maximum allowed arguments (None for unlimited)
-pub fn require_args(name: &str, args: &[LuaValue], min: usize, max: Option<usize>) -> Result<(), String> {
+pub fn require_args(
+    name: &str,
+    args: &[LuaValue],
+    min: usize,
+    max: Option<usize>,
+) -> Result<(), String> {
     if args.len() < min {
         return Err(format!(
             "{}() expects at least {} argument{}, got {}",
@@ -24,7 +28,7 @@ pub fn require_args(name: &str, args: &[LuaValue], min: usize, max: Option<usize
             args.len()
         ));
     }
-    
+
     if let Some(max_args) = max {
         if args.len() > max_args {
             return Err(format!(
@@ -36,18 +40,23 @@ pub fn require_args(name: &str, args: &[LuaValue], min: usize, max: Option<usize
             ));
         }
     }
-    
+
     Ok(())
 }
 
 /// Require specific type for argument at given index
-/// 
+///
 /// # Arguments
 /// * `name` - Function name for error messages
 /// * `index` - Argument position (0-based)
 /// * `arg` - The argument to validate
 /// * `expected` - Expected type name
-pub fn require_type(name: &str, index: usize, arg: &LuaValue, expected: &str) -> Result<(), String> {
+pub fn require_type(
+    name: &str,
+    index: usize,
+    arg: &LuaValue,
+    expected: &str,
+) -> Result<(), String> {
     let got = arg.type_name();
     if got != expected {
         Err(format!(
@@ -63,7 +72,7 @@ pub fn require_type(name: &str, index: usize, arg: &LuaValue, expected: &str) ->
 }
 
 /// Extract number with type checking
-/// 
+///
 /// # Arguments
 /// * `name` - Function name for error messages
 /// * `index` - Argument position (0-based)
@@ -81,7 +90,7 @@ pub fn get_number(name: &str, index: usize, arg: &LuaValue) -> Result<f64, Strin
 }
 
 /// Extract string with type checking
-/// 
+///
 /// # Arguments
 /// * `name` - Function name for error messages
 /// * `index` - Argument position (0-based)
@@ -99,12 +108,16 @@ pub fn get_string(name: &str, index: usize, arg: &LuaValue) -> Result<String, St
 }
 
 /// Extract table with type checking
-/// 
+///
 /// # Arguments
 /// * `name` - Function name for error messages
 /// * `index` - Argument position (0-based)
 /// * `arg` - The argument to extract
-pub fn get_table(name: &str, index: usize, arg: &LuaValue) -> Result<Rc<RefCell<LuaTable>>, String> {
+pub fn get_table(
+    name: &str,
+    index: usize,
+    arg: &LuaValue,
+) -> Result<Rc<RefCell<LuaTable>>, String> {
     match arg {
         LuaValue::Table(t) => Ok(t.clone()),
         _ => Err(format!(
@@ -117,7 +130,7 @@ pub fn get_table(name: &str, index: usize, arg: &LuaValue) -> Result<Rc<RefCell<
 }
 
 /// Extract boolean with type checking
-/// 
+///
 /// # Arguments
 /// * `name` - Function name for error messages
 /// * `index` - Argument position (0-based)
@@ -135,7 +148,7 @@ pub fn get_boolean(name: &str, index: usize, arg: &LuaValue) -> Result<bool, Str
 }
 
 /// Extract number as integer with type checking
-/// 
+///
 /// # Arguments
 /// * `name` - Function name for error messages
 /// * `index` - Argument position (0-based)

@@ -1,6 +1,5 @@
 /// Error handling for Lua interpreter
 /// Supports error() function and error propagation for pcall/xpcall
-
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]

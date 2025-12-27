@@ -1,19 +1,19 @@
-use muscm::parser::parse;
-use muscm::interpreter::{Interpreter, Environment};
-use muscm::lua_interpreter::LuaInterpreter;
-use muscm::lua_parser::{tokenize, parse as parse_lua, TokenSlice};
 use muscm::executor::Executor;
+use muscm::interpreter::{Environment, Interpreter};
+use muscm::lua_interpreter::LuaInterpreter;
+use muscm::lua_parser::{parse as parse_lua, tokenize, TokenSlice};
+use muscm::parser::parse;
 use std::env;
 use std::fs;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    
+
     if args.len() < 2 {
         run_scheme_default();
         return;
     }
-    
+
     match args[1].as_str() {
         "lua" => {
             if args.len() < 3 {
@@ -124,7 +124,7 @@ fn run_lua(file_path: &str) {
             std::process::exit(1);
         }
     };
-    
+
     // Tokenize the code
     let tokens = match tokenize(&code) {
         Ok(tokens) => tokens,
@@ -133,7 +133,7 @@ fn run_lua(file_path: &str) {
             std::process::exit(1);
         }
     };
-    
+
     // Parse the code
     let token_slice = TokenSlice::from(tokens.as_slice());
     let block = match parse_lua(token_slice) {
@@ -143,10 +143,10 @@ fn run_lua(file_path: &str) {
             std::process::exit(1);
         }
     };
-    
+
     // Create a Lua interpreter and executor
     let mut interpreter = LuaInterpreter::new();
-    
+
     // Add the script's directory to the module search paths
     let script_dir = std::path::Path::new(file_path)
         .canonicalize()
@@ -158,16 +158,16 @@ fn run_lua(file_path: &str) {
                 .parent()
                 .map(|p| std::path::PathBuf::from(p))
         });
-    
+
     if let Some(dir) = script_dir {
         interpreter.add_module_search_path(dir);
     }
-    
+
     let mut executor = Executor::new();
-    
+
     // Execute the block
     match executor.execute_block(&block, &mut interpreter) {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(e) => {
             eprintln!("Runtime error: {}", e);
             std::process::exit(1);

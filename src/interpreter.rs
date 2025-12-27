@@ -188,13 +188,15 @@ impl Interpreter {
                 }
             }
             SExpr::List(ids) => {
-                let items: Vec<SVal> = ids.iter()
+                let items: Vec<SVal> = ids
+                    .iter()
                     .filter_map(|id| arena.get(*id).map(|e| Self::sexpr_to_sval(e, arena)))
                     .collect();
                 SVal::List(items)
             }
             SExpr::Vector(ids) => {
-                let items: Vec<SVal> = ids.iter()
+                let items: Vec<SVal> = ids
+                    .iter()
                     .filter_map(|id| arena.get(*id).map(|e| Self::sexpr_to_sval(e, arena)))
                     .collect();
                 SVal::Vector(items)
@@ -266,7 +268,9 @@ impl Interpreter {
             }
             // Function definition: (define (name params...) body...)
             SExpr::List(sig_ids) if !sig_ids.is_empty() => {
-                let func_expr = arena.get(sig_ids[0]).ok_or("Invalid function name reference")?;
+                let func_expr = arena
+                    .get(sig_ids[0])
+                    .ok_or("Invalid function name reference")?;
                 match func_expr {
                     SExpr::Atom(func_name) => {
                         let params: Result<Vec<String>, String> = sig_ids[1..]
@@ -332,7 +336,10 @@ impl Interpreter {
 
         // Combine remaining items as body (implicit begin)
         let body = if ids.len() == 3 {
-            arena.get(ids[2]).ok_or("Invalid lambda body reference")?.clone()
+            arena
+                .get(ids[2])
+                .ok_or("Invalid lambda body reference")?
+                .clone()
         } else {
             // Create list of body ids
             let mut body_ids = vec![];
@@ -349,7 +356,12 @@ impl Interpreter {
     }
 
     /// Call a function value with arguments
-    fn call_function(func: SVal, args: Vec<SVal>, env: &mut Environment, arena: &Arena) -> Result<SVal, String> {
+    fn call_function(
+        func: SVal,
+        args: Vec<SVal>,
+        env: &mut Environment,
+        arena: &Arena,
+    ) -> Result<SVal, String> {
         match func {
             SVal::BuiltinProc { name: fname, .. } => Self::apply_builtin(&fname, args, env),
             SVal::UserProc { params, body } => {
@@ -920,11 +932,11 @@ impl Interpreter {
                             // Regular function call
                             _ => {
                                 let func = Self::eval(first_expr, env, arena)?;
-                                let args: Result<Vec<SVal>, String> =
-                                    ids[1..].iter()
-                                        .filter_map(|id| arena.get(*id))
-                                        .map(|arg| Self::eval(arg, env, arena))
-                                        .collect();
+                                let args: Result<Vec<SVal>, String> = ids[1..]
+                                    .iter()
+                                    .filter_map(|id| arena.get(*id))
+                                    .map(|arg| Self::eval(arg, env, arena))
+                                    .collect();
                                 let args = args?;
 
                                 Self::call_function(func, args, env, arena)
@@ -934,11 +946,11 @@ impl Interpreter {
                     // If the first element is not an atom, evaluate it
                     _ => {
                         let func = Self::eval(first_expr, env, arena)?;
-                        let args: Result<Vec<SVal>, String> =
-                            ids[1..].iter()
-                                .filter_map(|id| arena.get(*id))
-                                .map(|arg| Self::eval(arg, env, arena))
-                                .collect();
+                        let args: Result<Vec<SVal>, String> = ids[1..]
+                            .iter()
+                            .filter_map(|id| arena.get(*id))
+                            .map(|arg| Self::eval(arg, env, arena))
+                            .collect();
                         let args = args?;
 
                         Self::call_function(func, args, env, arena)

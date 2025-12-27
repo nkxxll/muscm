@@ -1,7 +1,7 @@
+use super::validation;
 /// Type conversion and type-related functions for Lua
 use crate::lua_value::LuaValue;
 use std::rc::Rc;
-use super::validation;
 
 /// Create the type() function that returns the type name of a value
 pub fn create_type() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>> {
@@ -17,15 +17,13 @@ pub fn create_tonumber() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>
         if args.is_empty() {
             return Ok(LuaValue::Nil);
         }
-        
+
         match &args[0] {
             LuaValue::Number(n) => Ok(LuaValue::Number(*n)),
-            LuaValue::String(s) => {
-                match s.trim().parse::<f64>() {
-                    Ok(n) => Ok(LuaValue::Number(n)),
-                    Err(_) => Ok(LuaValue::Nil),
-                }
-            }
+            LuaValue::String(s) => match s.trim().parse::<f64>() {
+                Ok(n) => Ok(LuaValue::Number(n)),
+                Err(_) => Ok(LuaValue::Nil),
+            },
             LuaValue::Boolean(b) => Ok(LuaValue::Number(if *b { 1.0 } else { 0.0 })),
             _ => Ok(LuaValue::Nil),
         }
@@ -38,7 +36,7 @@ pub fn create_tostring() -> Rc<dyn Fn(Vec<LuaValue>) -> Result<LuaValue, String>
         if args.is_empty() {
             return Ok(LuaValue::String("nil".to_string()));
         }
-        
+
         match &args[0] {
             LuaValue::String(s) => Ok(LuaValue::String(s.clone())),
             LuaValue::Nil => Ok(LuaValue::String("nil".to_string())),

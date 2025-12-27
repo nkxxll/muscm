@@ -25,8 +25,8 @@ impl fmt::Display for ParseError {
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { 
-            tokens, 
+        Parser {
+            tokens,
             pos: 0,
             arena: Arena::new(),
         }

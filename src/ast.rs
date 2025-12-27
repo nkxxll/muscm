@@ -143,7 +143,10 @@ impl fmt::Display for SExpr {
             SExpr::List(_) => {
                 write!(f, "#<node-list>")
             }
-            SExpr::Quote(_) | SExpr::QuasiQuote(_) | SExpr::Unquote(_) | SExpr::UnquoteSplicing(_) => {
+            SExpr::Quote(_)
+            | SExpr::QuasiQuote(_)
+            | SExpr::Unquote(_)
+            | SExpr::UnquoteSplicing(_) => {
                 write!(f, "#<node-ref>")
             }
             SExpr::Vector(_) => {

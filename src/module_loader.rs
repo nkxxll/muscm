@@ -1,13 +1,10 @@
 /// Phase 9: Module System
-/// 
+///
 /// This module implements a module loading system for Lua code.
 /// Allows code organization and reuse via `require("<module>")`.
-
 use crate::lua_value::LuaValue;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-
-
 
 /// Manages module loading and caching
 pub struct ModuleLoader {
@@ -39,7 +36,7 @@ impl ModuleLoader {
     }
 
     /// Resolve a module name to a file path
-    /// 
+    ///
     /// "mymodule" → finds mymodule.lua in search paths
     /// "config.server" → finds config/server.lua in search paths
     pub fn resolve_module(&self, module_name: &str) -> Result<PathBuf, String> {
@@ -61,8 +58,6 @@ impl ModuleLoader {
     pub fn is_cached(&self, module_name: &str) -> bool {
         self.loaded_modules.contains_key(module_name)
     }
-
-
 
     /// Clear the module cache
     pub fn clear_cache(&mut self) {
@@ -123,20 +118,18 @@ mod tests {
         let mut loader = ModuleLoader::new();
         assert!(!loader.is_cached("mymodule"));
 
-        loader.loaded_modules.insert(
-            "mymodule".to_string(),
-            LuaValue::Nil,
-        );
+        loader
+            .loaded_modules
+            .insert("mymodule".to_string(), LuaValue::Nil);
         assert!(loader.is_cached("mymodule"));
     }
 
     #[test]
     fn test_clear_cache() {
         let mut loader = ModuleLoader::new();
-        loader.loaded_modules.insert(
-            "module1".to_string(),
-            LuaValue::Number(42.0),
-        );
+        loader
+            .loaded_modules
+            .insert("module1".to_string(), LuaValue::Number(42.0));
         loader.loading.insert("module2".to_string());
 
         loader.clear_cache();

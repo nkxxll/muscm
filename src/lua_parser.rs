@@ -276,7 +276,7 @@ fn string_literal(input: &str) -> IResult<&str, ::std::string::String> {
     let (input, _) = char('"').parse(input)?;
     let (input, content) = take_while1(|c: char| c != '"').parse(input)?;
     let (input, _) = char('"').parse(input)?;
-    
+
     // Process escape sequences
     let processed = process_escape_sequences(content);
     Ok((input, processed))
@@ -285,7 +285,7 @@ fn string_literal(input: &str) -> IResult<&str, ::std::string::String> {
 fn process_escape_sequences(s: &str) -> String {
     let mut result = String::new();
     let mut chars = s.chars().peekable();
-    
+
     while let Some(ch) = chars.next() {
         if ch == '\\' {
             if let Some(&next_ch) = chars.peek() {
@@ -325,7 +325,7 @@ fn process_escape_sequences(s: &str) -> String {
             result.push(ch);
         }
     }
-    
+
     result
 }
 
@@ -763,7 +763,7 @@ fn parse_for_loop(t: TokenSlice) -> IResult<TokenSlice, Statement> {
 
 fn parse_function_decl(t: TokenSlice) -> IResult<TokenSlice, Statement> {
     let (rest, _) = token_tag(&Token::Function)(t)?;
-    
+
     // Parse function name - can be simple (foo) or qualified (M.test, a.b.c, or a:method)
     if let Some(Token::Identifier(name)) = rest.0.first() {
         let mut full_name = name.clone();
@@ -845,13 +845,7 @@ fn parse_local_statement(t: TokenSlice) -> IResult<TokenSlice, Statement> {
     })
     .parse(rest)?;
 
-    Ok((
-        rest,
-        Statement::LocalVars {
-            names,
-            values,
-        },
-    ))
+    Ok((rest, Statement::LocalVars { names, values }))
 }
 
 fn parse_assignment_or_call(t: TokenSlice) -> IResult<TokenSlice, Statement> {
@@ -876,10 +870,7 @@ fn parse_assignment_or_call(t: TokenSlice) -> IResult<TokenSlice, Statement> {
         variables.extend(rest_vars);
         variables.push(final_expr);
 
-        return Ok((
-            r,
-            Statement::Assignment { variables, values },
-        ));
+        return Ok((r, Statement::Assignment { variables, values }));
     }
 
     // Try assignment: varlist = explist
@@ -937,18 +928,21 @@ fn parse_args(t: TokenSlice) -> IResult<TokenSlice, Vec<Expression>> {
         let (rest, _) = token_tag(&Token::RParen)(rest)?;
         return Ok((rest, exprs.unwrap_or_default()));
     }
-    
+
     // Try table constructor
     if let Ok((rest, expr)) = parse_table_constructor(t) {
         return Ok((rest, vec![expr]));
     }
-    
+
     // Try string literal
     if let Ok((rest, expr)) = parse_string_literal(t) {
         return Ok((rest, vec![expr]));
     }
-    
-    Err(nom::Err::Error(nom::error::Error::new(t, nom::error::ErrorKind::Alt)))
+
+    Err(nom::Err::Error(nom::error::Error::new(
+        t,
+        nom::error::ErrorKind::Alt,
+    )))
 }
 
 /// Parse table constructor: `{ [fieldlist] }`
@@ -1003,7 +997,7 @@ fn parse_field(t: TokenSlice) -> IResult<TokenSlice, Field> {
             },
         ));
     }
-    
+
     // Try name = exp
     if let Some(Token::Identifier(name)) = t.0.first() {
         let name = name.clone();
@@ -1019,7 +1013,7 @@ fn parse_field(t: TokenSlice) -> IResult<TokenSlice, Field> {
             ));
         }
     }
-    
+
     // Try exp (implicit array index)
     let (rest, expr) = parse_expression(t)?;
     Ok((
@@ -1150,7 +1144,8 @@ fn parse_prefix_exp(t: TokenSlice) -> IResult<TokenSlice, Expression> {
             parse_number_literal_helper,
             parse_string_literal_helper,
         ))
-        .parse(t) {
+        .parse(t)
+        {
             (r, expr)
         } else if let Some(Token::LParen) = t.0.first() {
             // Parenthesized expression: ( exp )
@@ -1266,7 +1261,6 @@ fn parse_unary_expr(t: TokenSlice) -> IResult<TokenSlice, Expression> {
     ))
     .parse(t)
 }
-
 
 /// Parse expression with binary operators
 /// Lua operator precedence (lowest to highest):
@@ -2161,14 +2155,14 @@ mod tests {
     }
 
     // Phase 2 Tests: Prefix Expressions & Function Calls
-    
+
     #[test]
     fn test_parse_prefix_table_indexing() {
         let code = "t[1]";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, expr) = parse_prefix_exp(ts).unwrap();
-        
+
         match expr {
             Expression::TableIndexing { object, index } => {
                 assert!(matches!(*object, Expression::Identifier(_)));
@@ -2177,14 +2171,14 @@ mod tests {
             _ => panic!("Expected TableIndexing, got {:?}", expr),
         }
     }
-    
+
     #[test]
     fn test_parse_prefix_field_access() {
         let code = "obj.field";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, expr) = parse_prefix_exp(ts).unwrap();
-        
+
         match expr {
             Expression::FieldAccess { object, field } => {
                 assert!(matches!(*object, Expression::Identifier(_)));
@@ -2193,14 +2187,14 @@ mod tests {
             _ => panic!("Expected FieldAccess, got {:?}", expr),
         }
     }
-    
+
     #[test]
     fn test_parse_prefix_function_call() {
         let code = "print(42)";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, expr) = parse_prefix_exp(ts).unwrap();
-        
+
         match expr {
             Expression::FunctionCall { function, args } => {
                 assert!(matches!(*function, Expression::Identifier(_)));
@@ -2210,16 +2204,20 @@ mod tests {
             _ => panic!("Expected FunctionCall, got {:?}", expr),
         }
     }
-    
+
     #[test]
     fn test_parse_prefix_method_call() {
         let code = "obj:method(arg)";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, expr) = parse_prefix_exp(ts).unwrap();
-        
+
         match expr {
-            Expression::MethodCall { object, method, args } => {
+            Expression::MethodCall {
+                object,
+                method,
+                args,
+            } => {
                 assert!(matches!(*object, Expression::Identifier(_)));
                 assert_eq!(method, "method");
                 assert_eq!(args.len(), 1);
@@ -2227,14 +2225,14 @@ mod tests {
             _ => panic!("Expected MethodCall, got {:?}", expr),
         }
     }
-    
+
     #[test]
     fn test_parse_prefix_chained_access() {
         let code = "t[1].field";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, expr) = parse_prefix_exp(ts).unwrap();
-        
+
         // Should be FieldAccess { object: TableIndexing { ... }, field: "field" }
         match expr {
             Expression::FieldAccess { object, field } => {
@@ -2244,14 +2242,14 @@ mod tests {
             _ => panic!("Expected FieldAccess, got {:?}", expr),
         }
     }
-    
+
     #[test]
     fn test_parse_prefix_table_constructor_empty() {
         let code = "{}";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, expr) = parse_prefix_exp(ts).unwrap();
-        
+
         match expr {
             Expression::TableConstructor { fields } => {
                 assert_eq!(fields.len(), 0);
@@ -2259,14 +2257,14 @@ mod tests {
             _ => panic!("Expected TableConstructor, got {:?}", expr),
         }
     }
-    
+
     #[test]
     fn test_parse_prefix_table_constructor_fields() {
         let code = "{1, x = 2}";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, expr) = parse_prefix_exp(ts).unwrap();
-        
+
         match expr {
             Expression::TableConstructor { fields } => {
                 assert_eq!(fields.len(), 2);
@@ -2274,14 +2272,14 @@ mod tests {
             _ => panic!("Expected TableConstructor, got {:?}", expr),
         }
     }
-    
+
     #[test]
     fn test_parse_prefix_function_def() {
         let code = "function() return 42 end";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, expr) = parse_prefix_exp(ts).unwrap();
-        
+
         match expr {
             Expression::FunctionDef(body) => {
                 assert_eq!(body.params.len(), 0);
@@ -2290,14 +2288,14 @@ mod tests {
             _ => panic!("Expected FunctionDef, got {:?}", expr),
         }
     }
-    
+
     #[test]
     fn test_parse_prefix_function_def_params() {
         let code = "function(a, b) return a + b end";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, expr) = parse_prefix_exp(ts).unwrap();
-        
+
         match expr {
             Expression::FunctionDef(body) => {
                 assert_eq!(body.params.len(), 2);
@@ -2308,14 +2306,14 @@ mod tests {
             _ => panic!("Expected FunctionDef, got {:?}", expr),
         }
     }
-    
+
     #[test]
     fn test_parse_prefix_function_def_varargs() {
         let code = "function(...) end";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, expr) = parse_prefix_exp(ts).unwrap();
-        
+
         match expr {
             Expression::FunctionDef(body) => {
                 assert_eq!(body.params.len(), 0);
@@ -2324,21 +2322,21 @@ mod tests {
             _ => panic!("Expected FunctionDef, got {:?}", expr),
         }
     }
-    
+
     #[test]
     fn test_parse_prefix_parenthesized() {
         let code = "(42)";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, expr) = parse_prefix_exp(ts).unwrap();
-        
+
         // Parenthesized expressions are unwrapped, so we get the inner expr
         match expr {
             Expression::Number(_) => {}
             _ => panic!("Expected Number, got {:?}", expr),
         }
     }
-    
+
     #[test]
     fn test_empty_input() {
         let tokens = tokenize("").unwrap();
@@ -2412,7 +2410,7 @@ mod tests {
         // Ensure all binary operators tokenize correctly
         let code = "+ - * / // % ^ & | ~ << >> .. < <= > >= == ~= and or";
         let tokens = tokenize(code).unwrap();
-        
+
         assert!(tokens.iter().any(|t| matches!(t, Token::Plus)));
         assert!(tokens.iter().any(|t| matches!(t, Token::Minus)));
         assert!(tokens.iter().any(|t| matches!(t, Token::Star)));
@@ -2423,81 +2421,81 @@ mod tests {
         assert!(tokens.iter().any(|t| matches!(t, Token::And)));
         assert!(tokens.iter().any(|t| matches!(t, Token::Or)));
     }
-    
+
     // Phase 3: Statement Parsing Tests
-    
+
     #[test]
     fn test_parse_empty_statement() {
         let code = ";";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
             Statement::Empty => {}
             _ => panic!("Expected Empty statement, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_break_statement() {
         let code = "break";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
             Statement::Break => {}
             _ => panic!("Expected Break statement, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_label_statement() {
         let code = "::label::";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
             Statement::Label(name) => assert_eq!(name, "label"),
             _ => panic!("Expected Label statement, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_goto_statement() {
         let code = "goto label";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
             Statement::Goto(name) => assert_eq!(name, "label"),
             _ => panic!("Expected Goto statement, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_do_block() {
         let code = "do local x = 1 end";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
             Statement::Do(_) => {}
             _ => panic!("Expected Do block, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_while_loop() {
         let code = "while x < 10 do x = x + 1 end";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
             Statement::While { condition, body } => {
                 assert!(matches!(condition, Expression::BinaryOp { .. }));
@@ -2506,14 +2504,14 @@ mod tests {
             _ => panic!("Expected While loop, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_repeat_until() {
         let code = "repeat x = x + 1 until x >= 10";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
             Statement::Repeat { body, condition } => {
                 assert!(!body.statements.is_empty() || body.return_statement.is_some());
@@ -2522,16 +2520,21 @@ mod tests {
             _ => panic!("Expected Repeat-Until, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_if_statement_simple() {
         let code = "if x > 0 then y = 1 end";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
-            Statement::If { condition, then_block, elseif_parts, else_block } => {
+            Statement::If {
+                condition,
+                then_block,
+                elseif_parts,
+                else_block,
+            } => {
                 assert!(matches!(condition, Expression::BinaryOp { .. }));
                 assert!(elseif_parts.is_empty());
                 assert!(else_block.is_none());
@@ -2539,16 +2542,21 @@ mod tests {
             _ => panic!("Expected If statement, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_if_statement_with_else() {
         let code = "if x > 0 then y = 1 else y = 2 end";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
-            Statement::If { condition, then_block, elseif_parts, else_block } => {
+            Statement::If {
+                condition,
+                then_block,
+                elseif_parts,
+                else_block,
+            } => {
                 assert!(matches!(condition, Expression::BinaryOp { .. }));
                 assert!(elseif_parts.is_empty());
                 assert!(else_block.is_some());
@@ -2556,16 +2564,21 @@ mod tests {
             _ => panic!("Expected If statement, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_if_statement_with_elseif() {
         let code = "if x > 0 then y = 1 elseif x < 0 then y = -1 end";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
-            Statement::If { condition, then_block, elseif_parts, else_block } => {
+            Statement::If {
+                condition,
+                then_block,
+                elseif_parts,
+                else_block,
+            } => {
                 assert!(matches!(condition, Expression::BinaryOp { .. }));
                 assert_eq!(elseif_parts.len(), 1);
                 assert!(else_block.is_none());
@@ -2573,16 +2586,22 @@ mod tests {
             _ => panic!("Expected If statement, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_for_numeric() {
         let code = "for i = 1, 10 do x = i end";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
-            Statement::ForNumeric { var, start, end, step, body: _ } => {
+            Statement::ForNumeric {
+                var,
+                start,
+                end,
+                step,
+                body: _,
+            } => {
                 assert_eq!(var, "i");
                 assert!(matches!(start, Expression::Number(_)));
                 assert!(matches!(end, Expression::Number(_)));
@@ -2591,16 +2610,22 @@ mod tests {
             _ => panic!("Expected ForNumeric, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_for_numeric_with_step() {
         let code = "for i = 1, 10, 2 do x = i end";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
-            Statement::ForNumeric { var, start, end, step, body: _ } => {
+            Statement::ForNumeric {
+                var,
+                start,
+                end,
+                step,
+                body: _,
+            } => {
                 assert_eq!(var, "i");
                 assert!(matches!(start, Expression::Number(_)));
                 assert!(matches!(end, Expression::Number(_)));
@@ -2609,16 +2634,20 @@ mod tests {
             _ => panic!("Expected ForNumeric, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_for_generic() {
         let code = "for k, v in pairs(t) do print(k) end";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
-            Statement::ForGeneric { vars, iterables, body: _ } => {
+            Statement::ForGeneric {
+                vars,
+                iterables,
+                body: _,
+            } => {
                 assert_eq!(vars.len(), 2);
                 assert_eq!(vars[0], "k");
                 assert_eq!(vars[1], "v");
@@ -2627,14 +2656,14 @@ mod tests {
             _ => panic!("Expected ForGeneric, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_function_decl() {
         let code = "function add(a, b) return a + b end";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
             Statement::FunctionDecl { name, body } => {
                 assert_eq!(name, "add");
@@ -2643,14 +2672,14 @@ mod tests {
             _ => panic!("Expected FunctionDecl, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_local_function() {
         let code = "local function test() end";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
             Statement::LocalFunction { name, body } => {
                 assert_eq!(name, "test");
@@ -2659,14 +2688,14 @@ mod tests {
             _ => panic!("Expected LocalFunction, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_local_vars_without_values() {
         let code = "local x, y";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
             Statement::LocalVars { names, values } => {
                 assert_eq!(names.len(), 2);
@@ -2677,14 +2706,14 @@ mod tests {
             _ => panic!("Expected LocalVars, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_local_vars_with_values() {
         let code = "local x, y = 1, 2";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
             Statement::LocalVars { names, values } => {
                 assert_eq!(names.len(), 2);
@@ -2694,14 +2723,14 @@ mod tests {
             _ => panic!("Expected LocalVars, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_function_call_statement() {
         let code = "print(x)";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
             Statement::FunctionCall(expr) => {
                 assert!(matches!(expr, Expression::FunctionCall { .. }));
@@ -2709,14 +2738,14 @@ mod tests {
             _ => panic!("Expected FunctionCall statement, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_assignment_simple() {
         let code = "x = 5";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
             Statement::Assignment { variables, values } => {
                 assert_eq!(variables.len(), 1);
@@ -2725,14 +2754,14 @@ mod tests {
             _ => panic!("Expected Assignment, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_assignment_multiple() {
         let code = "x, y = 1, 2";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
             Statement::Assignment { variables, values } => {
                 assert_eq!(variables.len(), 2);
@@ -2741,14 +2770,14 @@ mod tests {
             _ => panic!("Expected Assignment, got {:?}", stmt),
         }
     }
-    
+
     #[test]
     fn test_parse_assignment_table_field() {
         let code = "t[1] = 5";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (_, stmt) = parse_statement(ts).unwrap();
-        
+
         match stmt {
             Statement::Assignment { variables, values } => {
                 assert_eq!(variables.len(), 1);
@@ -2758,138 +2787,138 @@ mod tests {
             _ => panic!("Expected Assignment, got {:?}", stmt),
         }
     }
-    
+
     // Phase 4: Top-Level Block Parsing Tests
-    
+
     #[test]
     fn test_parse_block_empty() {
         let code = "";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (rest, block) = parse_block(ts).unwrap();
-        
+
         assert!(block.statements.is_empty());
         assert!(block.return_statement.is_none());
         assert!(rest.0.is_empty());
     }
-    
+
     #[test]
     fn test_parse_block_single_statement() {
         let code = "x = 1";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (rest, block) = parse_block(ts).unwrap();
-        
+
         assert_eq!(block.statements.len(), 1);
         assert!(block.return_statement.is_none());
         assert!(rest.0.is_empty());
     }
-    
+
     #[test]
     fn test_parse_block_multiple_statements() {
         let code = "x = 1; y = 2; z = 3";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (rest, block) = parse_block(ts).unwrap();
-        
+
         assert_eq!(block.statements.len(), 5); // 3 assignments + 2 empty statements for semicolons
         assert!(block.return_statement.is_none());
         assert!(rest.0.is_empty());
     }
-    
+
     #[test]
     fn test_parse_block_with_return() {
         let code = "x = 1; return 42";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (rest, block) = parse_block(ts).unwrap();
-        
+
         assert_eq!(block.statements.len(), 2); // assignment + empty statement
         assert!(block.return_statement.is_some());
         assert!(rest.0.is_empty());
     }
-    
+
     #[test]
     fn test_parse_block_stops_at_end() {
         let code = "x = 1 end y = 2";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (rest, block) = parse_block(ts).unwrap();
-        
+
         assert_eq!(block.statements.len(), 1);
         assert!(block.return_statement.is_none());
         // Should stop before 'end'
         assert!(!rest.0.is_empty());
         assert_eq!(rest.0[0], Token::End);
     }
-    
+
     #[test]
     fn test_parse_block_stops_at_else() {
         let code = "x = 1 else y = 2";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (rest, block) = parse_block(ts).unwrap();
-        
+
         assert_eq!(block.statements.len(), 1);
         assert!(block.return_statement.is_none());
         // Should stop before 'else'
         assert!(!rest.0.is_empty());
         assert_eq!(rest.0[0], Token::Else);
     }
-    
+
     #[test]
     fn test_parse_block_stops_at_elseif() {
         let code = "x = 1 elseif x > 0 then";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (rest, block) = parse_block(ts).unwrap();
-        
+
         assert_eq!(block.statements.len(), 1);
         assert!(block.return_statement.is_none());
         // Should stop before 'elseif'
         assert!(!rest.0.is_empty());
         assert_eq!(rest.0[0], Token::Elseif);
     }
-    
+
     #[test]
     fn test_parse_block_stops_at_until() {
         let code = "x = 1 until x > 0";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (rest, block) = parse_block(ts).unwrap();
-        
+
         assert_eq!(block.statements.len(), 1);
         assert!(block.return_statement.is_none());
         // Should stop before 'until'
         assert!(!rest.0.is_empty());
         assert_eq!(rest.0[0], Token::Until);
     }
-    
+
     #[test]
     fn test_parse_chunk_simple() {
         let code = "local x = 1; print(x); return x";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (rest, block) = parse(ts).unwrap();
-        
+
         // Expecting: local, empty (from first semicolon), print call, empty (from second semicolon)
         assert_eq!(block.statements.len(), 4);
         assert!(block.return_statement.is_some());
         assert!(rest.0.is_empty());
     }
-    
+
     #[test]
     fn test_parse_chunk_with_do_block() {
         let code = "do local x = 1 end print(x)";
         let tokens = tokenize(code).unwrap();
         let ts = TokenSlice::from(tokens.as_slice());
         let (rest, block) = parse(ts).unwrap();
-        
+
         assert_eq!(block.statements.len(), 2); // do block + print call
         assert!(block.return_statement.is_none());
         assert!(rest.0.is_empty());
     }
-    
+
     #[test]
     fn test_parse_nested_blocks() {
         let code = "if x > 0 then y = 1; z = 2 else w = 3 end";
@@ -2899,7 +2928,11 @@ mod tests {
 
         assert_eq!(block.statements.len(), 1);
         match &block.statements[0] {
-            Statement::If { then_block, else_block, .. } => {
+            Statement::If {
+                then_block,
+                else_block,
+                ..
+            } => {
                 assert!(!then_block.statements.is_empty());
                 assert!(else_block.is_some());
             }
