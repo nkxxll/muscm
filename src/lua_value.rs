@@ -42,8 +42,8 @@ pub enum LuaFunction {
         varargs: bool,
         /// Function body (AST)
         body: Box<crate::lua_parser::Block>,
-        /// Variables captured from defining scope
-        captured: HashMap<String, LuaValue>,
+        /// Variables captured from defining scope (shared reference for proper closure semantics)
+        captured: Rc<RefCell<HashMap<String, LuaValue>>>,
     },
 }
 

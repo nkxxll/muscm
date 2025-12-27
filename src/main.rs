@@ -1,7 +1,34 @@
 use muscm::parser::parse;
 use muscm::interpreter::{Interpreter, Environment};
+use muscm::lua_interpreter::LuaInterpreter;
+use muscm::lua_parser::{tokenize, parse as parse_lua, TokenSlice};
+use muscm::executor::Executor;
+use std::env;
+use std::fs;
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+    
+    if args.len() < 2 {
+        run_scheme_default();
+        return;
+    }
+    
+    match args[1].as_str() {
+        "lua" => {
+            if args.len() < 3 {
+                eprintln!("Usage: {} lua <file>", args[0]);
+                std::process::exit(1);
+            }
+            run_lua(&args[2]);
+        }
+        _ => {
+            run_scheme_default();
+        }
+    }
+}
+
+fn run_scheme_default() {
     // Test Phase 3: List Operations
     let input = r#"
 (display "=== Phase 3: List Operations ===")
@@ -85,5 +112,65 @@ fn main() {
             }
         }
         Err(e) => println!("Parse error: {}", e),
+    }
+}
+
+fn run_lua(file_path: &str) {
+    // Read the Lua file
+    let code = match fs::read_to_string(file_path) {
+        Ok(content) => content,
+        Err(e) => {
+            eprintln!("Error reading file '{}': {}", file_path, e);
+            std::process::exit(1);
+        }
+    };
+    
+    // Tokenize the code
+    let tokens = match tokenize(&code) {
+        Ok(tokens) => tokens,
+        Err(e) => {
+            eprintln!("Tokenize error: {}", e);
+            std::process::exit(1);
+        }
+    };
+    
+    // Parse the code
+    let token_slice = TokenSlice::from(tokens.as_slice());
+    let block = match parse_lua(token_slice) {
+        Ok((_, block)) => block,
+        Err(e) => {
+            eprintln!("Parse error: {:?}", e);
+            std::process::exit(1);
+        }
+    };
+    
+    // Create a Lua interpreter and executor
+    let mut interpreter = LuaInterpreter::new();
+    
+    // Add the script's directory to the module search paths
+    let script_dir = std::path::Path::new(file_path)
+        .canonicalize()
+        .ok()
+        .and_then(|p| p.parent().map(|parent| parent.to_path_buf()))
+        .or_else(|| {
+            // Fallback: use parent of the path, or current dir if no parent
+            std::path::Path::new(file_path)
+                .parent()
+                .map(|p| std::path::PathBuf::from(p))
+        });
+    
+    if let Some(dir) = script_dir {
+        interpreter.add_module_search_path(dir);
+    }
+    
+    let mut executor = Executor::new();
+    
+    // Execute the block
+    match executor.execute_block(&block, &mut interpreter) {
+        Ok(_) => {},
+        Err(e) => {
+            eprintln!("Runtime error: {}", e);
+            std::process::exit(1);
+        }
     }
 }

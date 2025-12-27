@@ -12,6 +12,11 @@ use crate::lua_value::LuaValue;
 use crate::lua_parser::{Block, Statement, Expression, BinaryOp, UnaryOp, Field, FieldKey, FunctionBody};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::cell::RefCell;
+
+// Used in Phase 6 tests
+#[cfg(test)]
+use crate::lua_value::{LuaFunction, LuaTable};
 
 /// Control flow signals used to handle break, return, and goto statements
 #[derive(Debug, Clone)]
@@ -22,7 +27,7 @@ pub enum ControlFlow {
     Return(Vec<LuaValue>),
     /// Break from current loop
     Break,
-    /// Jump to a label (not fully implemented yet)
+    /// Jump to a label with target name
     Goto(String),
 }
 
@@ -136,8 +141,57 @@ impl Executor {
             } => self.execute_for_generic(vars, iterables, body, interp),
 
             Statement::FunctionDecl { name, body } => {
-                let func_value = self.create_function(body.clone(), interp)?;
-                interp.define(name.clone(), func_value);
+                let is_method = name.contains(':');
+                let func_value = if is_method {
+                    // For methods, we need to prepend 'self' to the parameters
+                    let mut new_body = body.as_ref().clone();
+                    new_body.params.insert(0, "self".to_string());
+                    self.create_function(Box::new(new_body), interp)?
+                } else {
+                    self.create_function(body.clone(), interp)?
+                };
+                
+                // Check if this is a qualified name (e.g., M.test or M:method)
+                if name.contains('.') || name.contains(':') {
+                    // Parse qualified name and assign to table
+                    let parts: Vec<&str> = if name.contains(':') {
+                        name.split(':').collect()
+                    } else {
+                        name.split('.').collect()
+                    };
+                    
+                    if parts.len() >= 2 {
+                        // Get the base table
+                        let base_name = parts[0];
+                        let mut table = interp.lookup(base_name)
+                            .ok_or_else(|| format!("Table '{}' not found", base_name))?;
+                        
+                        // Navigate through intermediate tables
+                        for i in 1..parts.len() - 1 {
+                            match table {
+                                LuaValue::Table(t) => {
+                                    let key = LuaValue::String(parts[i].to_string());
+                                    let next = t.borrow().data.get(&key)
+                                        .cloned()
+                                        .ok_or_else(|| format!("Key '{}' not found in table", parts[i]))?;
+                                    table = next;
+                                }
+                                _ => return Err(format!("'{}' is not a table", parts[i-1])),
+                            }
+                        }
+                        
+                        // Set the final key
+                        if let LuaValue::Table(t) = table {
+                            let final_key = LuaValue::String(parts[parts.len() - 1].to_string());
+                            t.borrow_mut().data.insert(final_key, func_value);
+                        } else {
+                            return Err("Cannot assign to non-table".to_string());
+                        }
+                    }
+                } else {
+                    // Simple name
+                    interp.define(name.clone(), func_value);
+                }
                 Ok(ControlFlow::Normal)
             }
 
@@ -464,9 +518,20 @@ impl Executor {
             } => {
                 // Method call: obj:method(args) -> method(obj, args)
                 let obj = self.eval_expression(object, interp)?;
-                let table = self.eval_expression(object, interp)?;
                 let key = LuaValue::String(method.clone());
-                let method_func = self.table_get(&table, key)?;
+                
+                let method_func = match &obj {
+                    LuaValue::String(_) => {
+                        // For strings, look up method in the string library
+                        let string_lib = interp.lookup("string")
+                            .ok_or_else(|| "string library not found".to_string())?;
+                        self.table_get(&string_lib, key)?
+                    }
+                    _ => {
+                        // For other types, look up in the object's table
+                        self.table_get(&obj, key)?
+                    }
+                };
 
                 let mut all_args = vec![obj];
                 all_args.extend(self.eval_expression_list(args, interp)?);
@@ -682,9 +747,38 @@ impl Executor {
         match table {
             LuaValue::Table(t) => {
                 let table_ref = t.borrow();
-                Ok(table_ref.data.get(&key).cloned().unwrap_or(LuaValue::Nil))
+                // Try to get the key directly
+                if let Some(value) = table_ref.data.get(&key) {
+                    return Ok(value.clone());
+                }
+                
+                // If not found, check metatable for __index
+                let index_handler = if let Some(mt) = &table_ref.metatable {
+                    mt.get("__index").cloned()
+                } else {
+                    None
+                };
+                
+                drop(table_ref);
+                
+                if let Some(handler) = index_handler {
+                    // __index can be a table or a function
+                    match handler {
+                        LuaValue::Table(_) => {
+                            // Recursively look up in __index table
+                            return self.table_get(&handler, key);
+                        }
+                        LuaValue::Function(_) => {
+                            // For functions, we'd need to call them - for now just return nil
+                            return Ok(LuaValue::Nil);
+                        }
+                        _ => {}
+                    }
+                }
+                
+                Ok(LuaValue::Nil)
             }
-            _ => Err(format!("Cannot index {}", table.type_name())),
+            _ => Err(format!("table get: Cannot index {}", table.type_name())),
         }
     }
 
@@ -696,7 +790,7 @@ impl Executor {
                 table_ref.data.insert(key, value);
                 Ok(())
             }
-            _ => Err(format!("Cannot index {}", table.type_name())),
+            _ => Err(format!("table set: Cannot index {}", table.type_name())),
         }
     }
 
@@ -764,7 +858,7 @@ impl Executor {
             params: body.params.clone(),
             varargs: body.varargs,
             body: body.block.clone(),
-            captured,
+            captured: Rc::new(RefCell::new(captured)),
         };
 
         Ok(LuaValue::Function(Rc::new(func)))
@@ -780,17 +874,30 @@ impl Executor {
         match func {
             LuaValue::Function(f) => match f.as_ref() {
                 crate::lua_value::LuaFunction::Builtin(builtin) => {
-                    // Call built-in function
-                    builtin(args)
+                    // Try to call the builtin
+                    match builtin(args.clone()) {
+                        // If require() needs special handling, extract module name from error
+                        Err(err) if err.contains("require() must be called through executor") => {
+                            if args.len() == 1 {
+                                if let LuaValue::String(module_name) = &args[0] {
+                                    return self.execute_require(module_name, interp);
+                                }
+                            }
+                            Err(err)
+                        }
+                        result => result,
+                    }
                 }
                 crate::lua_value::LuaFunction::User { params, varargs, body, captured } => {
                     // Create new scope for function execution
                     interp.push_scope();
                     
-                    // Restore captured variables
-                    for (name, value) in captured {
+                    // Restore captured variables from shared closure state
+                    let captured_vars = captured.borrow();
+                    for (name, value) in captured_vars.iter() {
                         interp.define(name.clone(), value.clone());
                     }
+                    drop(captured_vars);
 
                     // Bind parameters to arguments
                     for (i, param) in params.iter().enumerate() {
@@ -799,13 +906,31 @@ impl Executor {
                     }
 
                     // Handle varargs if present
-                    if *varargs && args.len() > params.len() {
-                        // For now, varargs are not fully supported
-                        // In a full implementation, we'd bind ... to remaining args
+                    if *varargs {
+                        // Collect extra arguments as varargs
+                        let _varargs_vec: Vec<LuaValue> = if args.len() > params.len() {
+                            args[params.len()..].to_vec()
+                        } else {
+                            Vec::new()
+                        };
+                        // Store varargs as a special table that can be accessed via ...
+                        // For now, we store it as a pseudo-variable for expression evaluation
+                        interp.define("...".to_string(), LuaValue::Nil); // Placeholder
                     }
 
                     // Execute function body
                     let result = self.execute_block(body, interp);
+                    
+                    // Before popping scope, sync modified captured variables back to the closure
+                    if let Some(current_scope) = interp.scope_stack.last() {
+                        let mut captured_mut = captured.borrow_mut();
+                        for (name, value) in captured_mut.iter_mut() {
+                            // Update with new value if it exists in current scope
+                            if let Some(new_value) = current_scope.get(name) {
+                                *value = new_value.clone();
+                            }
+                        }
+                    }
                     
                     // Pop scope and get return values
                     interp.pop_scope();
@@ -822,6 +947,108 @@ impl Executor {
             },
             _ => Err(format!("Cannot call {}", func.type_name())),
         }
+    }
+
+    /// Handle require() function call which needs special access to executor and interpreter
+    fn execute_require(
+        &mut self,
+        module_name: &str,
+        interp: &mut LuaInterpreter,
+    ) -> Result<LuaValue, String> {
+        use crate::lua_parser::{self, TokenSlice};
+
+        // Check cache first (without needing to hold borrow)
+        {
+            let loader = interp.module_loader.borrow();
+            if let Some(cached) = loader.loaded_modules.get(module_name) {
+                return Ok(cached.clone());
+            }
+            // Check if currently loading (circular dependency)
+            if loader.loading.contains(module_name) {
+                return Ok(interp.create_table());
+            }
+        }
+
+        // Mark as loading
+        interp.module_loader.borrow_mut().loading.insert(module_name.to_string());
+
+        // Resolve path
+        let path = {
+            let loader = interp.module_loader.borrow();
+            loader.resolve_module(module_name)
+        };
+
+        let path = match path {
+            Ok(p) => p,
+            Err(e) => {
+                interp.module_loader.borrow_mut().loading.remove(module_name);
+                return Err(e);
+            }
+        };
+
+        // Read file
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                interp.module_loader.borrow_mut().loading.remove(module_name);
+                return Err(format!("Cannot read module '{}': {}", module_name, e));
+            }
+        };
+
+        // Tokenize
+        let tokens = match lua_parser::tokenize(&content) {
+            Ok(t) => t,
+            Err(e) => {
+                interp.module_loader.borrow_mut().loading.remove(module_name);
+                return Err(format!("Tokenize error in module '{}': {}", module_name, e));
+            }
+        };
+
+        // Parse
+        let token_slice = TokenSlice::from(tokens.as_slice());
+        let ast = match lua_parser::parse(token_slice) {
+            Ok((_, block)) => block,
+            Err(e) => {
+                interp.module_loader.borrow_mut().loading.remove(module_name);
+                return Err(format!("Parse error in module '{}': {}", module_name, e));
+            }
+        };
+
+        // Execute in isolated scope
+        interp.push_scope();
+
+        let result = match self.execute_block(&ast, interp) {
+            Ok(control_flow) => {
+                use crate::executor::ControlFlow;
+
+                match control_flow {
+                    ControlFlow::Return(values) if !values.is_empty() => {
+                        values[0].clone()
+                    }
+                    _ => {
+                        interp
+                            .lookup("exports")
+                            .unwrap_or(LuaValue::Nil)
+                    }
+                }
+            }
+            Err(e) => {
+                interp.pop_scope();
+                interp.module_loader.borrow_mut().loading.remove(module_name);
+                return Err(format!("Runtime error in module '{}': {}", module_name, e));
+            }
+        };
+
+        interp.pop_scope();
+
+        // Mark as loaded and cache
+        {
+            let mut loader = interp.module_loader.borrow_mut();
+            loader.loading.remove(module_name);
+            loader.loaded_modules.insert(module_name.to_string(), result.clone());
+        }
+
+        Ok(result)
     }
 }
 
@@ -1280,5 +1507,899 @@ mod tests {
         let result = executor.call_function(func, vec![LuaValue::Number(5.0)], &mut interp);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), LuaValue::Number(15.0));
+    }
+
+    #[test]
+    fn test_local_variable_shadowing() {
+        let mut executor = Executor::new();
+        let mut interp = LuaInterpreter::new();
+
+        // Define global variable
+        interp.define("x".to_string(), LuaValue::Number(1.0));
+        assert_eq!(interp.lookup("x"), Some(LuaValue::Number(1.0)));
+
+        // Push scope and define local variable with same name
+        interp.push_scope();
+        interp.define("x".to_string(), LuaValue::Number(2.0));
+        assert_eq!(interp.lookup("x"), Some(LuaValue::Number(2.0)));
+
+        // Pop scope and verify original value
+        interp.pop_scope();
+        assert_eq!(interp.lookup("x"), Some(LuaValue::Number(1.0)));
+    }
+
+    #[test]
+    fn test_loop_break_statement() {
+        let mut executor = Executor::new();
+        let mut interp = LuaInterpreter::new();
+
+        // Create a loop that breaks
+        let break_stmt = Statement::Break;
+        let loop_body = Block {
+            statements: vec![break_stmt],
+            return_statement: None,
+        };
+
+        let while_stmt = Statement::While {
+            condition: Expression::Boolean(true),
+            body: Box::new(loop_body),
+        };
+
+        let result = executor.execute_statement(&while_stmt, &mut interp);
+        assert!(result.is_ok());
+        match result.unwrap() {
+            ControlFlow::Normal => {}, // Loop should exit normally after break
+            _ => panic!("Expected normal control flow after break"),
+        }
+    }
+
+    #[test]
+    fn test_local_variable_declaration() {
+        let mut executor = Executor::new();
+        let mut interp = LuaInterpreter::new();
+
+        // Define global variable
+        interp.define("x".to_string(), LuaValue::Number(1.0));
+
+        // Push scope for local declaration (simulating block context)
+        interp.push_scope();
+
+        // Create local variable declaration
+        let local_stmt = Statement::LocalVars {
+            names: vec!["y".to_string()],
+            values: Some(vec![Expression::Number("2".to_string())]),
+        };
+
+        executor.execute_statement(&local_stmt, &mut interp).unwrap();
+
+        // Local y should exist and be 2
+        assert_eq!(interp.lookup("y"), Some(LuaValue::Number(2.0)));
+        // Global x should still exist and be 1
+        assert_eq!(interp.lookup("x"), Some(LuaValue::Number(1.0)));
+
+        // Pop scope
+        interp.pop_scope();
+
+        // After popping, y should not be accessible
+        assert_eq!(interp.lookup("y"), None);
+        // But x should still be 1
+        assert_eq!(interp.lookup("x"), Some(LuaValue::Number(1.0)));
+    }
+
+    #[test]
+    fn test_do_block_scope() {
+        let mut executor = Executor::new();
+        let mut interp = LuaInterpreter::new();
+
+        // Define global variable
+        interp.define("x".to_string(), LuaValue::Number(1.0));
+
+        // Create do block that redefines x
+        let do_block = Block {
+            statements: vec![
+                Statement::LocalVars {
+                    names: vec!["x".to_string()],
+                    values: Some(vec![Expression::Number("2".to_string())]),
+                }
+            ],
+            return_statement: None,
+        };
+
+        let do_stmt = Statement::Do(Box::new(do_block));
+        executor.execute_statement(&do_stmt, &mut interp).unwrap();
+
+        // Global x should still be 1
+        assert_eq!(interp.lookup("x"), Some(LuaValue::Number(1.0)));
+    }
+
+    #[test]
+    fn test_multiple_scope_levels() {
+        let mut executor = Executor::new();
+        let mut interp = LuaInterpreter::new();
+
+        // Level 0 (global)
+        interp.define("a".to_string(), LuaValue::Number(1.0));
+        assert_eq!(interp.lookup("a"), Some(LuaValue::Number(1.0)));
+
+        // Level 1
+        interp.push_scope();
+        interp.define("a".to_string(), LuaValue::Number(2.0));
+        interp.define("b".to_string(), LuaValue::Number(20.0));
+        assert_eq!(interp.lookup("a"), Some(LuaValue::Number(2.0)));
+        assert_eq!(interp.lookup("b"), Some(LuaValue::Number(20.0)));
+
+        // Level 2
+        interp.push_scope();
+        interp.define("a".to_string(), LuaValue::Number(3.0));
+        interp.define("c".to_string(), LuaValue::Number(30.0));
+        assert_eq!(interp.lookup("a"), Some(LuaValue::Number(3.0)));
+        assert_eq!(interp.lookup("b"), Some(LuaValue::Number(20.0))); // Accessible from level 1
+        assert_eq!(interp.lookup("c"), Some(LuaValue::Number(30.0)));
+
+        // Pop to level 1
+        interp.pop_scope();
+        assert_eq!(interp.lookup("a"), Some(LuaValue::Number(2.0)));
+        assert_eq!(interp.lookup("b"), Some(LuaValue::Number(20.0)));
+        assert_eq!(interp.lookup("c"), None); // Not accessible
+
+        // Pop to level 0 (global)
+        interp.pop_scope();
+        assert_eq!(interp.lookup("a"), Some(LuaValue::Number(1.0)));
+        assert_eq!(interp.lookup("b"), None);
+    }
+
+    #[test]
+    fn test_repeat_until_loop() {
+        let mut executor = Executor::new();
+        let mut interp = LuaInterpreter::new();
+
+        // Create repeat-until loop
+        let increment = Statement::Assignment {
+            variables: vec![Expression::Identifier("i".to_string())],
+            values: vec![Expression::BinaryOp {
+                left: Box::new(Expression::Identifier("i".to_string())),
+                op: BinaryOp::Add,
+                right: Box::new(Expression::Number("1".to_string())),
+            }],
+        };
+
+        let loop_body = Block {
+            statements: vec![increment],
+            return_statement: None,
+        };
+
+        let repeat_stmt = Statement::Repeat {
+            body: Box::new(loop_body),
+            condition: Expression::BinaryOp {
+                left: Box::new(Expression::Identifier("i".to_string())),
+                op: BinaryOp::Gte,
+                right: Box::new(Expression::Number("3".to_string())),
+            },
+        };
+
+        interp.define("i".to_string(), LuaValue::Number(0.0));
+        let result = executor.execute_statement(&repeat_stmt, &mut interp);
+        assert!(result.is_ok());
+
+        // i should be 3 after loop
+        assert_eq!(interp.lookup("i"), Some(LuaValue::Number(3.0)));
+    }
+
+    #[test]
+    fn test_for_numeric_loop() {
+        let mut executor = Executor::new();
+        let mut interp = LuaInterpreter::new();
+
+        // Create accumulator variable
+        interp.define("sum".to_string(), LuaValue::Number(0.0));
+
+        // Create loop body that accumulates sum
+        let sum_stmt = Statement::Assignment {
+            variables: vec![Expression::Identifier("sum".to_string())],
+            values: vec![Expression::BinaryOp {
+                left: Box::new(Expression::Identifier("sum".to_string())),
+                op: BinaryOp::Add,
+                right: Box::new(Expression::Identifier("i".to_string())),
+            }],
+        };
+
+        let loop_body = Block {
+            statements: vec![sum_stmt],
+            return_statement: None,
+        };
+
+        let for_stmt = Statement::ForNumeric {
+            var: "i".to_string(),
+            start: Expression::Number("1".to_string()),
+            end: Expression::Number("5".to_string()),
+            step: None,
+            body: Box::new(loop_body),
+        };
+
+        executor.execute_statement(&for_stmt, &mut interp).unwrap();
+
+        // sum should be 1+2+3+4+5 = 15
+        assert_eq!(interp.lookup("sum"), Some(LuaValue::Number(15.0)));
+    }
+
+    #[test]
+    fn test_for_numeric_with_step() {
+        let mut executor = Executor::new();
+        let mut interp = LuaInterpreter::new();
+
+        // Create accumulator variable
+        interp.define("sum".to_string(), LuaValue::Number(0.0));
+
+        // Create loop body
+        let sum_stmt = Statement::Assignment {
+            variables: vec![Expression::Identifier("sum".to_string())],
+            values: vec![Expression::BinaryOp {
+                left: Box::new(Expression::Identifier("sum".to_string())),
+                op: BinaryOp::Add,
+                right: Box::new(Expression::Identifier("i".to_string())),
+            }],
+        };
+
+        let loop_body = Block {
+            statements: vec![sum_stmt],
+            return_statement: None,
+        };
+
+        // for i = 1, 10, 2 do sum = sum + i end (1, 3, 5, 7, 9)
+        let for_stmt = Statement::ForNumeric {
+            var: "i".to_string(),
+            start: Expression::Number("1".to_string()),
+            end: Expression::Number("10".to_string()),
+            step: Some(Expression::Number("2".to_string())),
+            body: Box::new(loop_body),
+        };
+
+        executor.execute_statement(&for_stmt, &mut interp).unwrap();
+
+        // sum should be 1+3+5+7+9 = 25
+        assert_eq!(interp.lookup("sum"), Some(LuaValue::Number(25.0)));
+    }
+
+    #[test]
+    fn test_label_definition() {
+        let mut executor = Executor::new();
+        let mut interp = LuaInterpreter::new();
+
+        // Create label statement
+        let label_stmt = Statement::Label("start".to_string());
+
+        let result = executor.execute_statement(&label_stmt, &mut interp);
+        assert!(result.is_ok());
+
+        // Label should be marked as existing
+        assert!(executor.labels.contains_key("start"));
+    }
+
+    #[test]
+    fn test_function_with_varargs() {
+        let mut executor = Executor::new();
+        let mut interp = LuaInterpreter::new();
+
+        // Create function: function(a, b, ...) return a + b end
+        let return_stmt = crate::lua_parser::ReturnStatement {
+            expression_list: vec![
+                Expression::BinaryOp {
+                    left: Box::new(Expression::Identifier("a".to_string())),
+                    op: BinaryOp::Add,
+                    right: Box::new(Expression::Identifier("b".to_string())),
+                }
+            ],
+        };
+
+        let func_body = FunctionBody {
+            params: vec!["a".to_string(), "b".to_string()],
+            varargs: true,
+            block: Box::new(Block {
+                statements: vec![],
+                return_statement: Some(return_stmt),
+            }),
+        };
+
+        let func = executor.create_function(Box::new(func_body), &interp).unwrap();
+
+        // Call with extra arguments (should accept them without error)
+        let result = executor.call_function(
+            func,
+            vec![
+                LuaValue::Number(5.0),
+                LuaValue::Number(3.0),
+                LuaValue::Number(10.0), // Extra argument
+                LuaValue::Number(20.0), // Extra argument
+            ],
+            &mut interp,
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), LuaValue::Number(8.0)); // 5 + 3
+    }
+
+    // =====================
+    // Phase 6 Tests: Standard Library
+    // =====================
+
+    #[test]
+    fn test_print_function() {
+        let interp = LuaInterpreter::new();
+        // print() is available in globals
+        assert!(interp.globals.contains_key("print"));
+    }
+
+    #[test]
+    fn test_type_function() {
+        let mut interp = LuaInterpreter::new();
+        let mut executor = Executor::new();
+        
+        // Test type() on different values
+        let result = executor.call_function(
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(crate::stdlib::create_type()))),
+            vec![LuaValue::Number(42.0)],
+            &mut interp,
+        );
+        assert_eq!(result.unwrap(), LuaValue::String("number".to_string()));
+        
+        let result = executor.call_function(
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(crate::stdlib::create_type()))),
+            vec![LuaValue::String("hello".to_string())],
+            &mut interp,
+        );
+        assert_eq!(result.unwrap(), LuaValue::String("string".to_string()));
+    }
+
+    #[test]
+    fn test_tonumber_function() {
+        let mut interp = LuaInterpreter::new();
+        let mut executor = Executor::new();
+        
+        // Convert string to number
+        let result = executor.call_function(
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(crate::stdlib::create_tonumber()))),
+            vec![LuaValue::String("123".to_string())],
+            &mut interp,
+        );
+        assert_eq!(result.unwrap(), LuaValue::Number(123.0));
+        
+        // Invalid string returns nil
+        let result = executor.call_function(
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(crate::stdlib::create_tonumber()))),
+            vec![LuaValue::String("abc".to_string())],
+            &mut interp,
+        );
+        assert_eq!(result.unwrap(), LuaValue::Nil);
+    }
+
+    #[test]
+    fn test_tostring_function() {
+        let mut interp = LuaInterpreter::new();
+        let mut executor = Executor::new();
+        
+        // Convert number to string
+        let result = executor.call_function(
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(crate::stdlib::create_tostring()))),
+            vec![LuaValue::Number(42.0)],
+            &mut interp,
+        );
+        assert_eq!(result.unwrap(), LuaValue::String("42".to_string()));
+        
+        // Convert boolean to string
+        let result = executor.call_function(
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(crate::stdlib::create_tostring()))),
+            vec![LuaValue::Boolean(true)],
+            &mut interp,
+        );
+        assert_eq!(result.unwrap(), LuaValue::String("true".to_string()));
+    }
+
+    #[test]
+    fn test_string_len() {
+        let mut interp = LuaInterpreter::new();
+        let mut executor = Executor::new();
+        
+        let result = executor.call_function(
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(crate::stdlib::create_string_len()))),
+            vec![LuaValue::String("hello".to_string())],
+            &mut interp,
+        );
+        assert_eq!(result.unwrap(), LuaValue::Number(5.0));
+    }
+
+    #[test]
+    fn test_string_upper() {
+        let mut interp = LuaInterpreter::new();
+        let mut executor = Executor::new();
+        
+        let result = executor.call_function(
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(crate::stdlib::create_string_upper()))),
+            vec![LuaValue::String("hello".to_string())],
+            &mut interp,
+        );
+        assert_eq!(result.unwrap(), LuaValue::String("HELLO".to_string()));
+    }
+
+    #[test]
+    fn test_string_lower() {
+        let mut interp = LuaInterpreter::new();
+        let mut executor = Executor::new();
+        
+        let result = executor.call_function(
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(crate::stdlib::create_string_lower()))),
+            vec![LuaValue::String("HELLO".to_string())],
+            &mut interp,
+        );
+        assert_eq!(result.unwrap(), LuaValue::String("hello".to_string()));
+    }
+
+    #[test]
+    fn test_string_sub() {
+        let mut interp = LuaInterpreter::new();
+        let mut executor = Executor::new();
+        
+        let result = executor.call_function(
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(crate::stdlib::create_string_sub()))),
+            vec![
+                LuaValue::String("hello".to_string()),
+                LuaValue::Number(1.0),
+                LuaValue::Number(3.0),
+            ],
+            &mut interp,
+        );
+        assert_eq!(result.unwrap(), LuaValue::String("hel".to_string()));
+    }
+
+    #[test]
+    fn test_math_abs() {
+        let mut interp = LuaInterpreter::new();
+        let mut executor = Executor::new();
+        
+        let result = executor.call_function(
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(crate::stdlib::create_math_abs()))),
+            vec![LuaValue::Number(-42.0)],
+            &mut interp,
+        );
+        assert_eq!(result.unwrap(), LuaValue::Number(42.0));
+    }
+
+    #[test]
+    fn test_math_floor() {
+        let mut interp = LuaInterpreter::new();
+        let mut executor = Executor::new();
+        
+        let result = executor.call_function(
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(crate::stdlib::create_math_floor()))),
+            vec![LuaValue::Number(3.7)],
+            &mut interp,
+        );
+        assert_eq!(result.unwrap(), LuaValue::Number(3.0));
+    }
+
+    #[test]
+    fn test_math_ceil() {
+        let mut interp = LuaInterpreter::new();
+        let mut executor = Executor::new();
+        
+        let result = executor.call_function(
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(crate::stdlib::create_math_ceil()))),
+            vec![LuaValue::Number(3.2)],
+            &mut interp,
+        );
+        assert_eq!(result.unwrap(), LuaValue::Number(4.0));
+    }
+
+    #[test]
+    fn test_math_min() {
+        let mut interp = LuaInterpreter::new();
+        let mut executor = Executor::new();
+        
+        let result = executor.call_function(
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(crate::stdlib::create_math_min()))),
+            vec![
+                LuaValue::Number(5.0),
+                LuaValue::Number(2.0),
+                LuaValue::Number(8.0),
+            ],
+            &mut interp,
+        );
+        assert_eq!(result.unwrap(), LuaValue::Number(2.0));
+    }
+
+    #[test]
+    fn test_math_max() {
+        let mut interp = LuaInterpreter::new();
+        let mut executor = Executor::new();
+        
+        let result = executor.call_function(
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(crate::stdlib::create_math_max()))),
+            vec![
+                LuaValue::Number(5.0),
+                LuaValue::Number(2.0),
+                LuaValue::Number(8.0),
+            ],
+            &mut interp,
+        );
+        assert_eq!(result.unwrap(), LuaValue::Number(8.0));
+    }
+
+    #[test]
+    fn test_table_insert() {
+        let mut interp = LuaInterpreter::new();
+        let mut executor = Executor::new();
+        
+        // Create a table
+        let table = LuaValue::Table(Rc::new(RefCell::new(LuaTable {
+            data: HashMap::new(),
+            metatable: None,
+        })));
+        
+        let result = executor.call_function(
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(crate::stdlib::create_table_insert()))),
+            vec![table.clone(), LuaValue::Number(42.0)],
+            &mut interp,
+        );
+        assert_eq!(result.unwrap(), LuaValue::Nil);
+        
+        // Verify the value was inserted
+        if let LuaValue::Table(t) = table {
+            let table_ref = t.borrow();
+            assert!(table_ref.data.contains_key(&LuaValue::Number(1.0)));
+        }
+    }
+
+    #[test]
+    fn test_string_table_exists() {
+        let interp = LuaInterpreter::new();
+        let string_table = interp.globals.get("string");
+        assert!(string_table.is_some());
+        
+        if let Some(LuaValue::Table(t)) = string_table {
+            let table = t.borrow();
+            assert!(table.data.contains_key(&LuaValue::String("len".to_string())));
+            assert!(table.data.contains_key(&LuaValue::String("upper".to_string())));
+            assert!(table.data.contains_key(&LuaValue::String("lower".to_string())));
+            assert!(table.data.contains_key(&LuaValue::String("sub".to_string())));
+        } else {
+            panic!("string table not found or not a table");
+        }
+    }
+
+    #[test]
+    fn test_math_table_exists() {
+        let interp = LuaInterpreter::new();
+        let math_table = interp.globals.get("math");
+        assert!(math_table.is_some());
+        
+        if let Some(LuaValue::Table(t)) = math_table {
+            let table = t.borrow();
+            assert!(table.data.contains_key(&LuaValue::String("abs".to_string())));
+            assert!(table.data.contains_key(&LuaValue::String("floor".to_string())));
+            assert!(table.data.contains_key(&LuaValue::String("ceil".to_string())));
+            assert!(table.data.contains_key(&LuaValue::String("min".to_string())));
+            assert!(table.data.contains_key(&LuaValue::String("max".to_string())));
+        } else {
+            panic!("math table not found or not a table");
+        }
+    }
+
+    #[test]
+    fn test_table_table_exists() {
+        let interp = LuaInterpreter::new();
+        let table_table = interp.globals.get("table");
+        assert!(table_table.is_some());
+        
+        if let Some(LuaValue::Table(t)) = table_table {
+            let table = t.borrow();
+            assert!(table.data.contains_key(&LuaValue::String("insert".to_string())));
+            assert!(table.data.contains_key(&LuaValue::String("remove".to_string())));
+        } else {
+            panic!("table table not found or not a table");
+        }
+    }
+
+    // Phase 7: Metatables Tests
+    
+    #[test]
+    fn test_setgetmetatable_basic() {
+        let interp = LuaInterpreter::new();
+        
+        // Create a table
+        let t = LuaValue::Table(Rc::new(RefCell::new(LuaTable {
+            data: HashMap::new(),
+            metatable: None,
+        })));
+        
+        // Create a metatable
+        let mt = LuaValue::Table(Rc::new(RefCell::new(LuaTable {
+            data: HashMap::new(),
+            metatable: None,
+        })));
+        
+        // Call setmetatable(t, mt) via the function
+        let setmetatable_fn = interp.lookup("setmetatable").unwrap();
+        if let LuaValue::Function(f) = setmetatable_fn {
+            if let crate::lua_value::LuaFunction::Builtin(builtin) = f.as_ref() {
+                let result = builtin(vec![t.clone(), mt.clone()]);
+                assert!(result.is_ok());
+                
+                // Verify that getmetatable returns the metatable
+                let getmetatable_fn = interp.lookup("getmetatable").unwrap();
+                if let LuaValue::Function(gf) = getmetatable_fn {
+                    if let crate::lua_value::LuaFunction::Builtin(gbuiltin) = gf.as_ref() {
+                        let mt_result = gbuiltin(vec![t.clone()]);
+                        assert!(mt_result.is_ok());
+                        assert!(matches!(mt_result.unwrap(), LuaValue::Table(_)));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_setmetatable_nil_clears() {
+        let interp = LuaInterpreter::new();
+        
+        // Create a table with metatable
+        let t = LuaValue::Table(Rc::new(RefCell::new(LuaTable {
+            data: HashMap::new(),
+            metatable: Some(Box::new(HashMap::new())),
+        })));
+        
+        // Clear metatable with nil
+        let setmetatable_fn = interp.lookup("setmetatable").unwrap();
+        if let LuaValue::Function(f) = setmetatable_fn {
+            if let crate::lua_value::LuaFunction::Builtin(builtin) = f.as_ref() {
+                let result = builtin(vec![t.clone(), LuaValue::Nil]);
+                assert!(result.is_ok());
+                
+                // Verify metatable is cleared
+                let getmetatable_fn = interp.lookup("getmetatable").unwrap();
+                if let LuaValue::Function(gf) = getmetatable_fn {
+                    if let crate::lua_value::LuaFunction::Builtin(gbuiltin) = gf.as_ref() {
+                        let mt_result = gbuiltin(vec![t.clone()]);
+                        assert!(mt_result.is_ok());
+                        assert_eq!(mt_result.unwrap(), LuaValue::Nil);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_getmetatable_nonexistent() {
+        let interp = LuaInterpreter::new();
+        
+        // Create a table without metatable
+        let t = LuaValue::Table(Rc::new(RefCell::new(LuaTable {
+            data: HashMap::new(),
+            metatable: None,
+        })));
+        
+        // getmetatable should return nil
+        let getmetatable_fn = interp.lookup("getmetatable").unwrap();
+        if let LuaValue::Function(f) = getmetatable_fn {
+            if let crate::lua_value::LuaFunction::Builtin(builtin) = f.as_ref() {
+                let result = builtin(vec![t]);
+                assert!(result.is_ok());
+                assert_eq!(result.unwrap(), LuaValue::Nil);
+            }
+        }
+    }
+
+    #[test]
+    fn test_getmetatable_non_table() {
+        let interp = LuaInterpreter::new();
+        
+        // getmetatable on non-table should return nil
+        let getmetatable_fn = interp.lookup("getmetatable").unwrap();
+        if let LuaValue::Function(f) = getmetatable_fn {
+            if let crate::lua_value::LuaFunction::Builtin(builtin) = f.as_ref() {
+                let result = builtin(vec![LuaValue::Number(42.0)]);
+                assert!(result.is_ok());
+                assert_eq!(result.unwrap(), LuaValue::Nil);
+            }
+        }
+    }
+
+    // Phase 7: Error Handling Tests
+    
+    #[test]
+    fn test_error_function() {
+        let interp = LuaInterpreter::new();
+        
+        let error_fn = interp.lookup("error").unwrap();
+        if let LuaValue::Function(f) = error_fn {
+            if let crate::lua_value::LuaFunction::Builtin(builtin) = f.as_ref() {
+                let result = builtin(vec![LuaValue::String("test error".to_string())]);
+                assert!(result.is_err());
+                assert_eq!(result.unwrap_err(), "test error");
+            }
+        }
+    }
+
+    #[test]
+    fn test_pcall_requires_function() {
+        let interp = LuaInterpreter::new();
+        
+        let pcall_fn = interp.lookup("pcall").unwrap();
+        if let LuaValue::Function(f) = pcall_fn {
+            if let crate::lua_value::LuaFunction::Builtin(builtin) = f.as_ref() {
+                let result = builtin(vec![LuaValue::Number(42.0)]);
+                assert!(result.is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn test_pcall_with_function() {
+        let interp = LuaInterpreter::new();
+        
+        // Create a simple function
+        let func = LuaValue::Function(Rc::new(LuaFunction::Builtin(
+            Rc::new(|_| Ok(LuaValue::Number(42.0)))
+        )));
+        
+        let pcall_fn = interp.lookup("pcall").unwrap();
+        if let LuaValue::Function(f) = pcall_fn {
+            if let crate::lua_value::LuaFunction::Builtin(builtin) = f.as_ref() {
+                let result = builtin(vec![func]);
+                assert!(result.is_ok());
+            }
+        }
+    }
+
+    #[test]
+    fn test_xpcall_requires_functions() {
+        let interp = LuaInterpreter::new();
+        
+        let xpcall_fn = interp.lookup("xpcall").unwrap();
+        if let LuaValue::Function(f) = xpcall_fn {
+            if let crate::lua_value::LuaFunction::Builtin(builtin) = f.as_ref() {
+                let result = builtin(vec![LuaValue::Number(42.0), LuaValue::Number(0.0)]);
+                assert!(result.is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn test_xpcall_with_functions() {
+        let interp = LuaInterpreter::new();
+        
+        // Create two simple functions
+        let func1 = LuaValue::Function(Rc::new(LuaFunction::Builtin(
+            Rc::new(|_| Ok(LuaValue::Number(42.0)))
+        )));
+        let func2 = LuaValue::Function(Rc::new(LuaFunction::Builtin(
+            Rc::new(|_| Ok(LuaValue::String("error handled".to_string())))
+        )));
+        
+        let xpcall_fn = interp.lookup("xpcall").unwrap();
+        if let LuaValue::Function(f) = xpcall_fn {
+            if let crate::lua_value::LuaFunction::Builtin(builtin) = f.as_ref() {
+                let result = builtin(vec![func1, func2]);
+                assert!(result.is_ok());
+            }
+        }
+    }
+
+    // Phase 7: Coroutine Tests
+    
+    #[test]
+    fn test_coroutine_table_exists() {
+        let interp = LuaInterpreter::new();
+        let coro_table = interp.globals.get("coroutine");
+        assert!(coro_table.is_some());
+        
+        if let Some(LuaValue::Table(t)) = coro_table {
+            let table = t.borrow();
+            assert!(table.data.contains_key(&LuaValue::String("create".to_string())));
+            assert!(table.data.contains_key(&LuaValue::String("resume".to_string())));
+            assert!(table.data.contains_key(&LuaValue::String("yield".to_string())));
+            assert!(table.data.contains_key(&LuaValue::String("status".to_string())));
+        } else {
+            panic!("coroutine table not found or not a table");
+        }
+    }
+
+    #[test]
+    fn test_phase7_functions_registered() {
+        let interp = LuaInterpreter::new();
+        
+        // Check Phase 7 functions are registered
+        assert!(interp.globals.contains_key("setmetatable"));
+        assert!(interp.globals.contains_key("getmetatable"));
+        assert!(interp.globals.contains_key("pcall"));
+        assert!(interp.globals.contains_key("xpcall"));
+        assert!(interp.globals.contains_key("error"));
+        assert!(interp.globals.contains_key("coroutine"));
+    }
+
+    #[test]
+    fn test_metatable_with_string_keys() {
+        let interp = LuaInterpreter::new();
+        
+        // Create a table with string keys for metamethods
+        let mut mt_data = HashMap::new();
+        mt_data.insert(
+            LuaValue::String("__add".to_string()),
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(
+                Rc::new(|args| {
+                    // Simple add that returns sum of first two numbers
+                    if args.len() >= 2 {
+                        let a = args[0].to_number().unwrap_or(0.0);
+                        let b = args[1].to_number().unwrap_or(0.0);
+                        Ok(LuaValue::Number(a + b))
+                    } else {
+                        Ok(LuaValue::Nil)
+                    }
+                })
+            )))
+        );
+        
+        let mt = LuaValue::Table(Rc::new(RefCell::new(LuaTable {
+            data: mt_data,
+            metatable: None,
+        })));
+        
+        let t = LuaValue::Table(Rc::new(RefCell::new(LuaTable {
+            data: HashMap::new(),
+            metatable: None,
+        })));
+        
+        let setmetatable_fn = interp.lookup("setmetatable").unwrap();
+        if let LuaValue::Function(f) = setmetatable_fn {
+            if let crate::lua_value::LuaFunction::Builtin(builtin) = f.as_ref() {
+                let result = builtin(vec![t.clone(), mt.clone()]);
+                assert!(result.is_ok());
+                
+                // Verify metamethod is accessible through getmetatable
+                let getmetatable_fn = interp.lookup("getmetatable").unwrap();
+                if let LuaValue::Function(gf) = getmetatable_fn {
+                    if let crate::lua_value::LuaFunction::Builtin(gbuiltin) = gf.as_ref() {
+                        let mt_retrieved = gbuiltin(vec![t.clone()]);
+                        assert!(mt_retrieved.is_ok());
+                        
+                        if let Ok(LuaValue::Table(mt_table)) = mt_retrieved {
+                            let mt_borrow = mt_table.borrow();
+                            assert!(mt_borrow.data.contains_key(&LuaValue::String("__add".to_string())));
+                        } else {
+                            panic!("Expected table from getmetatable");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_upvalues_module_loads() {
+        // Just verify the upvalues module compiles and can be used
+        use crate::upvalues::{Upvalue, ClosureState};
+        
+        let mut cs = ClosureState::new();
+        let uv = Upvalue::new("x".to_string(), 0, LuaValue::Number(42.0));
+        cs.add_upvalue(uv.clone());
+        
+        assert_eq!(cs.get_upvalue("x").unwrap().value, LuaValue::Number(42.0));
+        
+        cs.update_upvalue("x", LuaValue::Number(100.0));
+        assert_eq!(cs.get_upvalue("x").unwrap().value, LuaValue::Number(100.0));
+    }
+
+    #[test]
+    fn test_coroutines_module_loads() {
+        // Just verify the coroutines module compiles and can be used
+        use crate::coroutines::{Coroutine, CoroutineStatus, CoroutineRegistry};
+        
+        let mut co = Coroutine::new(1, vec![], vec![]);
+        assert_eq!(co.status, CoroutineStatus::Suspended);
+        
+        let (ok, _) = co.resume(vec![]);
+        assert!(ok);
+        assert_eq!(co.status, CoroutineStatus::Running);
+        
+        let mut registry = CoroutineRegistry::new();
+        let id = registry.create(vec![], vec![]);
+        assert!(registry.get(id).is_some());
     }
 }

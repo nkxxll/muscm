@@ -1,4 +1,5 @@
 use crate::ast::{Arena, NodeId, SExpr};
+use crate::scheme_stdlib;
 use std::fmt;
 
 /// Runtime value representation for Scheme
@@ -104,179 +105,8 @@ impl Environment {
             parent: None,
         };
 
-        // Register built-in procedures
-        let builtins = vec![
-            // Arithmetic
-            (
-                "+",
-                SVal::BuiltinProc {
-                    name: "+".to_string(),
-                    arity: None,
-                },
-            ),
-            (
-                "-",
-                SVal::BuiltinProc {
-                    name: "-".to_string(),
-                    arity: None,
-                },
-            ),
-            (
-                "*",
-                SVal::BuiltinProc {
-                    name: "*".to_string(),
-                    arity: None,
-                },
-            ),
-            (
-                "/",
-                SVal::BuiltinProc {
-                    name: "/".to_string(),
-                    arity: None,
-                },
-            ),
-            // Comparison
-            (
-                "=",
-                SVal::BuiltinProc {
-                    name: "=".to_string(),
-                    arity: Some(2),
-                },
-            ),
-            (
-                "<",
-                SVal::BuiltinProc {
-                    name: "<".to_string(),
-                    arity: Some(2),
-                },
-            ),
-            (
-                ">",
-                SVal::BuiltinProc {
-                    name: ">".to_string(),
-                    arity: Some(2),
-                },
-            ),
-            (
-                "<=",
-                SVal::BuiltinProc {
-                    name: "<=".to_string(),
-                    arity: Some(2),
-                },
-            ),
-            (
-                ">=",
-                SVal::BuiltinProc {
-                    name: ">=".to_string(),
-                    arity: Some(2),
-                },
-            ),
-            // Type predicates
-            (
-                "number?",
-                SVal::BuiltinProc {
-                    name: "number?".to_string(),
-                    arity: Some(1),
-                },
-            ),
-            (
-                "symbol?",
-                SVal::BuiltinProc {
-                    name: "symbol?".to_string(),
-                    arity: Some(1),
-                },
-            ),
-            (
-                "pair?",
-                SVal::BuiltinProc {
-                    name: "pair?".to_string(),
-                    arity: Some(1),
-                },
-            ),
-            (
-                "null?",
-                SVal::BuiltinProc {
-                    name: "null?".to_string(),
-                    arity: Some(1),
-                },
-            ),
-            // List operations
-            (
-                "car",
-                SVal::BuiltinProc {
-                    name: "car".to_string(),
-                    arity: Some(1),
-                },
-            ),
-            (
-                "cdr",
-                SVal::BuiltinProc {
-                    name: "cdr".to_string(),
-                    arity: Some(1),
-                },
-            ),
-            (
-                "cons",
-                SVal::BuiltinProc {
-                    name: "cons".to_string(),
-                    arity: Some(2),
-                },
-            ),
-            (
-                "list",
-                SVal::BuiltinProc {
-                    name: "list".to_string(),
-                    arity: None,
-                },
-            ),
-            (
-                "length",
-                SVal::BuiltinProc {
-                    name: "length".to_string(),
-                    arity: Some(1),
-                },
-            ),
-            (
-                "list?",
-                SVal::BuiltinProc {
-                    name: "list?".to_string(),
-                    arity: Some(1),
-                },
-            ),
-            (
-                "append",
-                SVal::BuiltinProc {
-                    name: "append".to_string(),
-                    arity: None,
-                },
-            ),
-            (
-                "atom?",
-                SVal::BuiltinProc {
-                    name: "atom?".to_string(),
-                    arity: Some(1),
-                },
-            ),
-            // I/O
-            (
-                "display",
-                SVal::BuiltinProc {
-                    name: "display".to_string(),
-                    arity: None,
-                },
-            ),
-            (
-                "newline",
-                SVal::BuiltinProc {
-                    name: "newline".to_string(),
-                    arity: Some(0),
-                },
-            ),
-        ];
-
-        for (name, val) in builtins {
-            env.define(name.to_string(), val);
-        }
+        // Register all builtins via stdlib module
+        scheme_stdlib::register_stdlib(&mut env);
 
         env
     }
@@ -801,6 +631,247 @@ impl Interpreter {
             "newline" => {
                 println!();
                 Ok(SVal::Nil)
+            }
+
+            // Mathematical functions
+            "abs" => {
+                if args.len() != 1 {
+                    return Err("abs expects exactly 1 argument".to_string());
+                }
+                match args[0] {
+                    SVal::Number(n) => Ok(SVal::Number(n.abs())),
+                    _ => Err("abs expects a number".to_string()),
+                }
+            }
+            "floor" => {
+                if args.len() != 1 {
+                    return Err("floor expects exactly 1 argument".to_string());
+                }
+                match args[0] {
+                    SVal::Number(n) => Ok(SVal::Number(n.floor())),
+                    _ => Err("floor expects a number".to_string()),
+                }
+            }
+            "ceiling" => {
+                if args.len() != 1 {
+                    return Err("ceiling expects exactly 1 argument".to_string());
+                }
+                match args[0] {
+                    SVal::Number(n) => Ok(SVal::Number(n.ceil())),
+                    _ => Err("ceiling expects a number".to_string()),
+                }
+            }
+            "round" => {
+                if args.len() != 1 {
+                    return Err("round expects exactly 1 argument".to_string());
+                }
+                match args[0] {
+                    SVal::Number(n) => Ok(SVal::Number(n.round())),
+                    _ => Err("round expects a number".to_string()),
+                }
+            }
+            "truncate" => {
+                if args.len() != 1 {
+                    return Err("truncate expects exactly 1 argument".to_string());
+                }
+                match args[0] {
+                    SVal::Number(n) => Ok(SVal::Number(n.trunc())),
+                    _ => Err("truncate expects a number".to_string()),
+                }
+            }
+            "sqrt" => {
+                if args.len() != 1 {
+                    return Err("sqrt expects exactly 1 argument".to_string());
+                }
+                match args[0] {
+                    SVal::Number(n) => {
+                        if n < 0.0 {
+                            return Err("sqrt expects a non-negative number".to_string());
+                        }
+                        Ok(SVal::Number(n.sqrt()))
+                    }
+                    _ => Err("sqrt expects a number".to_string()),
+                }
+            }
+            "sin" => {
+                if args.len() != 1 {
+                    return Err("sin expects exactly 1 argument".to_string());
+                }
+                match args[0] {
+                    SVal::Number(n) => Ok(SVal::Number(n.sin())),
+                    _ => Err("sin expects a number".to_string()),
+                }
+            }
+            "cos" => {
+                if args.len() != 1 {
+                    return Err("cos expects exactly 1 argument".to_string());
+                }
+                match args[0] {
+                    SVal::Number(n) => Ok(SVal::Number(n.cos())),
+                    _ => Err("cos expects a number".to_string()),
+                }
+            }
+            "tan" => {
+                if args.len() != 1 {
+                    return Err("tan expects exactly 1 argument".to_string());
+                }
+                match args[0] {
+                    SVal::Number(n) => Ok(SVal::Number(n.tan())),
+                    _ => Err("tan expects a number".to_string()),
+                }
+            }
+            "log" => {
+                if args.len() != 1 {
+                    return Err("log expects exactly 1 argument".to_string());
+                }
+                match args[0] {
+                    SVal::Number(n) => {
+                        if n <= 0.0 {
+                            return Err("log expects a positive number".to_string());
+                        }
+                        Ok(SVal::Number(n.ln()))
+                    }
+                    _ => Err("log expects a number".to_string()),
+                }
+            }
+            "exp" => {
+                if args.len() != 1 {
+                    return Err("exp expects exactly 1 argument".to_string());
+                }
+                match args[0] {
+                    SVal::Number(n) => Ok(SVal::Number(n.exp())),
+                    _ => Err("exp expects a number".to_string()),
+                }
+            }
+            "min" => {
+                if args.is_empty() {
+                    return Err("min expects at least 1 argument".to_string());
+                }
+                let mut result = match args[0] {
+                    SVal::Number(n) => n,
+                    _ => return Err("min expects numbers".to_string()),
+                };
+                for arg in &args[1..] {
+                    match arg {
+                        SVal::Number(n) => {
+                            if *n < result {
+                                result = *n;
+                            }
+                        }
+                        _ => return Err("min expects numbers".to_string()),
+                    }
+                }
+                Ok(SVal::Number(result))
+            }
+            "max" => {
+                if args.is_empty() {
+                    return Err("max expects at least 1 argument".to_string());
+                }
+                let mut result = match args[0] {
+                    SVal::Number(n) => n,
+                    _ => return Err("max expects numbers".to_string()),
+                };
+                for arg in &args[1..] {
+                    match arg {
+                        SVal::Number(n) => {
+                            if *n > result {
+                                result = *n;
+                            }
+                        }
+                        _ => return Err("max expects numbers".to_string()),
+                    }
+                }
+                Ok(SVal::Number(result))
+            }
+
+            // String functions
+            "string?" => {
+                if args.len() != 1 {
+                    return Err("string? expects exactly 1 argument".to_string());
+                }
+                Ok(SVal::Bool(matches!(args[0], SVal::String(_))))
+            }
+            "string-length" => {
+                if args.len() != 1 {
+                    return Err("string-length expects exactly 1 argument".to_string());
+                }
+                match &args[0] {
+                    SVal::String(s) => Ok(SVal::Number(s.len() as f64)),
+                    _ => Err("string-length expects a string".to_string()),
+                }
+            }
+            "substring" => {
+                if args.len() != 3 {
+                    return Err("substring expects exactly 3 arguments".to_string());
+                }
+                match (&args[0], &args[1], &args[2]) {
+                    (SVal::String(s), SVal::Number(start), SVal::Number(end)) => {
+                        let start = *start as usize;
+                        let end = *end as usize;
+                        if start > end || end > s.len() {
+                            return Err("substring indices out of range".to_string());
+                        }
+                        Ok(SVal::String(s[start..end].to_string()))
+                    }
+                    _ => Err("substring expects (string, number, number)".to_string()),
+                }
+            }
+            "string-upcase" => {
+                if args.len() != 1 {
+                    return Err("string-upcase expects exactly 1 argument".to_string());
+                }
+                match &args[0] {
+                    SVal::String(s) => Ok(SVal::String(s.to_uppercase())),
+                    _ => Err("string-upcase expects a string".to_string()),
+                }
+            }
+            "string-downcase" => {
+                if args.len() != 1 {
+                    return Err("string-downcase expects exactly 1 argument".to_string());
+                }
+                match &args[0] {
+                    SVal::String(s) => Ok(SVal::String(s.to_lowercase())),
+                    _ => Err("string-downcase expects a string".to_string()),
+                }
+            }
+            "string-append" => {
+                let mut result = String::new();
+                for arg in args {
+                    match arg {
+                        SVal::String(s) => result.push_str(&s),
+                        _ => return Err("string-append expects strings".to_string()),
+                    }
+                }
+                Ok(SVal::String(result))
+            }
+            "string->number" => {
+                if args.len() != 1 {
+                    return Err("string->number expects exactly 1 argument".to_string());
+                }
+                match &args[0] {
+                    SVal::String(s) => {
+                        match s.trim().parse::<f64>() {
+                            Ok(n) => Ok(SVal::Number(n)),
+                            Err(_) => Ok(SVal::Bool(false)), // Return #f on parse failure (Scheme convention)
+                        }
+                    }
+                    _ => Err("string->number expects a string".to_string()),
+                }
+            }
+            "number->string" => {
+                if args.len() != 1 {
+                    return Err("number->string expects exactly 1 argument".to_string());
+                }
+                match args[0] {
+                    SVal::Number(n) => {
+                        if n.fract() == 0.0 {
+                            Ok(SVal::String(format!("{}", n as i64)))
+                        } else {
+                            Ok(SVal::String(format!("{}", n)))
+                        }
+                    }
+                    _ => Err("number->string expects a number".to_string()),
+                }
             }
 
             _ => Err(format!("Unknown function: {}", name)),

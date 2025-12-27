@@ -1,0 +1,5 @@
+local AsciiRender = require("ascii_render")
+print("AsciiRender:", type(AsciiRender))
+print("AsciiRender.init:", type(AsciiRender.init))
+local canvas = AsciiRender.init(80, 24)
+print("canvas:", type(canvas))

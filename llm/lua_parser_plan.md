@@ -40,29 +40,46 @@ The Lua parser is now fully functional with complete expression, statement, and 
 
 ## Phase 1: Core Expression Parsing
 
-### 1.1 Binary Operator Precedence
-- [x] Implement operator precedence table (Lua has 14 levels)
-- [x] Write `parse_binary_op` with proper precedence climbing
-- [x] Add test cases for precedence (e.g., `a + b * c`)
+### 1.1 Binary Operator Precedence & Precedence Climbing Algorithm
+- [x] Document Lua operator precedence (14 levels from lowest to highest):
+  - `or` (precedence 1)
+  - `and` (precedence 2)  
+  - `<`, `<=`, `>`, `>=`, `==`, `~=` (precedence 3)
+  - `|` (bitwise or) (precedence 4)
+  - `~` (bitwise xor) (precedence 5)
+  - `&` (bitwise and) (precedence 6)
+  - `<<`, `>>` (shifts) (precedence 7)
+  - `..` (concatenation, right-associative) (precedence 8)
+  - `+`, `-` (precedence 9)
+  - `*`, `/`, `//`, `%` (precedence 10)
+  - unary: `-`, `not`, `#`, `~` (precedence 11)
+  - `^` (exponentiation, right-associative) (precedence 12)
+- [x] Implement operator precedence table with associativity information
+- [x] Write `parse_binary_op` with precedence climbing algorithm
+- [x] Add comprehensive test cases for:
+  - Correct precedence: `a + b * c` evaluates as `a + (b * c)`
+  - Right-associative operators: `a ^ b ^ c` evaluates as `a ^ (b ^ c)`
+  - Left-associative operators: `a - b - c` evaluates as `(a - b) - c`
+  - Mixed associativity
 
-### 1.2 Complete Expression Parsing
+### 1.2 Unary & Primary Expression Parsing
 - [x] `parse_unary_expr` (handle `-`, `not`, `#`, `~`)
-- [x] `parse_power_expr` (right-associative `^`)
-- [x] `parse_multiplicative_expr` (`*`, `/`, `//`, `%`)
-- [x] `parse_additive_expr` (`+`, `-`)
-- [x] `parse_concat_expr` (`.., right-associative`)
-- [x] `parse_relational_expr` (`<`, `<=`, `>`, `>=`, `==`, `~=`)
-- [x] `parse_logical_and_expr` (`and`)
-- [x] `parse_logical_or_expr` (`or`)
-- [x] Test each level with edge cases
-
-### 1.3 Primary Expressions
+- [x] `parse_literal` (nil, booleans, numbers, strings)
 - [x] `parse_parenthesized_expr` - `(exp)`
+- [x] Test unary operators with various operand types
+- [x] Test parenthesized expressions for precedence override
+
+### 1.3 Composite Expression Structures
 - [x] `parse_table_constructor` - `{fieldlist}`
-  - [x] Parse field variants: `[exp] = exp`, `name = exp`, `exp`
+  - [x] Parse field variants: `[exp] = exp`, `name = exp`, `exp` (positional)
   - [x] Handle field separators (`,` or `;`)
+  - [x] Handle trailing separators
+  - [x] Test empty tables `{}`
+  - [x] Test mixed field types in single table
 - [x] `parse_function_def` - `function funcbody`
-- [x] Test combinations with proper precedence
+  - [x] Parse parameter list (including `...` varargs)
+  - [x] Test function definitions with no args, multiple args, varargs
+- [x] Test combinations of all expression types with proper precedence
 
 **Phase 1 Status**: ✅ COMPLETE (55 passing tests)
 

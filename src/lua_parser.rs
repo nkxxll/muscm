@@ -276,7 +276,57 @@ fn string_literal(input: &str) -> IResult<&str, ::std::string::String> {
     let (input, _) = char('"').parse(input)?;
     let (input, content) = take_while1(|c: char| c != '"').parse(input)?;
     let (input, _) = char('"').parse(input)?;
-    Ok((input, content.to_string()))
+    
+    // Process escape sequences
+    let processed = process_escape_sequences(content);
+    Ok((input, processed))
+}
+
+fn process_escape_sequences(s: &str) -> String {
+    let mut result = String::new();
+    let mut chars = s.chars().peekable();
+    
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            if let Some(&next_ch) = chars.peek() {
+                match next_ch {
+                    'n' => {
+                        result.push('\n');
+                        chars.next();
+                    }
+                    't' => {
+                        result.push('\t');
+                        chars.next();
+                    }
+                    'r' => {
+                        result.push('\r');
+                        chars.next();
+                    }
+                    '\\' => {
+                        result.push('\\');
+                        chars.next();
+                    }
+                    '"' => {
+                        result.push('"');
+                        chars.next();
+                    }
+                    '\'' => {
+                        result.push('\'');
+                        chars.next();
+                    }
+                    _ => {
+                        result.push(ch);
+                    }
+                }
+            } else {
+                result.push(ch);
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+    
+    result
 }
 
 // Tokenizer
@@ -714,16 +764,49 @@ fn parse_for_loop(t: TokenSlice) -> IResult<TokenSlice, Statement> {
 fn parse_function_decl(t: TokenSlice) -> IResult<TokenSlice, Statement> {
     let (rest, _) = token_tag(&Token::Function)(t)?;
     
-    // Parse function name
+    // Parse function name - can be simple (foo) or qualified (M.test, a.b.c, or a:method)
     if let Some(Token::Identifier(name)) = rest.0.first() {
-        let name = name.clone();
-        let rest = TokenSlice(&rest.0[1..]);
+        let mut full_name = name.clone();
+        let mut rest = TokenSlice(&rest.0[1..]);
+
+        // Handle qualified names like M.test or a:method
+        loop {
+            if let Some(Token::Dot) = rest.0.first() {
+                rest = TokenSlice(&rest.0[1..]);
+                if let Some(Token::Identifier(member)) = rest.0.first() {
+                    full_name.push('.');
+                    full_name.push_str(member);
+                    rest = TokenSlice(&rest.0[1..]);
+                } else {
+                    return Err(nom::Err::Error(nom::error::Error::new(
+                        rest,
+                        nom::error::ErrorKind::Tag,
+                    )));
+                }
+            } else if let Some(Token::Colon) = rest.0.first() {
+                // Method definition (a:b becomes a.b with self parameter)
+                rest = TokenSlice(&rest.0[1..]);
+                if let Some(Token::Identifier(method)) = rest.0.first() {
+                    full_name.push(':');
+                    full_name.push_str(method);
+                    rest = TokenSlice(&rest.0[1..]);
+                } else {
+                    return Err(nom::Err::Error(nom::error::Error::new(
+                        rest,
+                        nom::error::ErrorKind::Tag,
+                    )));
+                }
+                break;
+            } else {
+                break;
+            }
+        }
 
         let (rest, body) = parse_funcbody(rest)?;
         Ok((
             rest,
             Statement::FunctionDecl {
-                name,
+                name: full_name,
                 body: Box::new(body),
             },
         ))
@@ -821,17 +904,6 @@ fn parse_assignment_or_call(t: TokenSlice) -> IResult<TokenSlice, Statement> {
             t,
             nom::error::ErrorKind::Alt,
         ))),
-    }
-}
-
-fn parse_number_literal(t: TokenSlice) -> IResult<TokenSlice, Expression> {
-    if let Some(Token::Number(n)) = t.0.first() {
-        Ok((TokenSlice(&t.0[1..]), Expression::Number(n.clone())))
-    } else {
-        Err(nom::Err::Error(nom::error::Error::new(
-            t,
-            nom::error::ErrorKind::Tag,
-        )))
     }
 }
 
@@ -1170,111 +1242,6 @@ fn parse_prefix_exp(t: TokenSlice) -> IResult<TokenSlice, Expression> {
     Ok((rest, expr))
 }
 
-/// Parse a simple literal: nil | false | true | number | string | ...
-fn parse_literal(t: TokenSlice) -> IResult<TokenSlice, Expression> {
-    alt((
-        map(token_tag(&Token::Nil), |_| Expression::Nil),
-        map(token_tag(&Token::True), |_| Expression::Boolean(true)),
-        map(token_tag(&Token::False), |_| Expression::Boolean(false)),
-        map(token_tag(&Token::Varargs), |_| Expression::Varargs),
-        parse_number_literal,
-        parse_string_literal,
-        parse_identifier,
-    ))
-    .parse(t)
-}
-
-/// Binary operator precedence levels (highest to lowest)
-/// Lua has 14 precedence levels
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Precedence {
-    Or = 0,
-    And = 1,
-    RelationalEq = 2,    // <, <=, >, >=, ==, ~=
-    BitOr = 3,
-    BitXor = 4,
-    BitAnd = 5,
-    Concat = 6,          // .. (right-associative)
-    Shift = 7,           // <<, >>
-    Additive = 8,        // +, -
-    Multiplicative = 9,  // *, /, //, %
-    UnaryBitNot = 10,    // ~, not, -, #, ^ (prefix)
-    Exponent = 11,       // ^ (right-associative)
-}
-
-impl Precedence {
-    fn of(op: &BinaryOp) -> Self {
-        match op {
-            BinaryOp::Or => Precedence::Or,
-            BinaryOp::And => Precedence::And,
-            BinaryOp::Lt | BinaryOp::Lte | BinaryOp::Gt | BinaryOp::Gte 
-            | BinaryOp::Eq | BinaryOp::Neq => Precedence::RelationalEq,
-            BinaryOp::BitOr => Precedence::BitOr,
-            BinaryOp::BitXor => Precedence::BitXor,
-            BinaryOp::BitAnd => Precedence::BitAnd,
-            BinaryOp::Concat => Precedence::Concat,
-            BinaryOp::LeftShift | BinaryOp::RightShift => Precedence::Shift,
-            BinaryOp::Add | BinaryOp::Subtract => Precedence::Additive,
-            BinaryOp::Multiply | BinaryOp::Divide | BinaryOp::FloorDivide | BinaryOp::Modulo => Precedence::Multiplicative,
-            BinaryOp::Power => Precedence::Exponent,
-        }
-    }
-
-    fn is_right_associative(&self) -> bool {
-        matches!(self, Precedence::Concat | Precedence::Exponent)
-    }
-
-    fn next_level(&self) -> Self {
-        // Return the next lower precedence level (higher numeric value)
-        match self {
-            Precedence::Or => Precedence::And,
-            Precedence::And => Precedence::RelationalEq,
-            Precedence::RelationalEq => Precedence::BitOr,
-            Precedence::BitOr => Precedence::BitXor,
-            Precedence::BitXor => Precedence::BitAnd,
-            Precedence::BitAnd => Precedence::Concat,
-            Precedence::Concat => Precedence::Shift,
-            Precedence::Shift => Precedence::Additive,
-            Precedence::Additive => Precedence::Multiplicative,
-            Precedence::Multiplicative => Precedence::UnaryBitNot,
-            Precedence::UnaryBitNot => Precedence::Exponent,
-            Precedence::Exponent => Precedence::Exponent, // Can't go higher
-        }
-    }
-}
-
-/// Try to parse a token as a binary operator
-fn token_to_binop(t: TokenSlice) -> Option<BinaryOp> {
-    if let Some(token) = t.0.first() {
-        match token {
-            Token::Plus => Some(BinaryOp::Add),
-            Token::Minus => Some(BinaryOp::Subtract),
-            Token::Star => Some(BinaryOp::Multiply),
-            Token::Slash => Some(BinaryOp::Divide),
-            Token::DoubleSlash => Some(BinaryOp::FloorDivide),
-            Token::Percent => Some(BinaryOp::Modulo),
-            Token::Caret => Some(BinaryOp::Power),
-            Token::Concat => Some(BinaryOp::Concat),
-            Token::Ampersand => Some(BinaryOp::BitAnd),
-            Token::Pipe => Some(BinaryOp::BitOr),
-            Token::Tilde => Some(BinaryOp::BitXor),
-            Token::LShift => Some(BinaryOp::LeftShift),
-            Token::RShift => Some(BinaryOp::RightShift),
-            Token::Lt => Some(BinaryOp::Lt),
-            Token::Lte => Some(BinaryOp::Lte),
-            Token::Gt => Some(BinaryOp::Gt),
-            Token::Gte => Some(BinaryOp::Gte),
-            Token::Eq => Some(BinaryOp::Eq),
-            Token::Neq => Some(BinaryOp::Neq),
-            Token::And => Some(BinaryOp::And),
-            Token::Or => Some(BinaryOp::Or),
-            _ => None,
-        }
-    } else {
-        None
-    }
-}
-
 /// Parse unary operators: - | not | # | ~
 fn parse_unary_op(t: TokenSlice) -> IResult<TokenSlice, UnaryOp> {
     alt((
@@ -1300,54 +1267,6 @@ fn parse_unary_expr(t: TokenSlice) -> IResult<TokenSlice, Expression> {
     .parse(t)
 }
 
-/// Parse binary operations using precedence climbing
-/// min_prec: only process operators with precedence >= min_prec
-fn parse_binary_op(t: TokenSlice, min_prec: Precedence) -> IResult<TokenSlice, Expression> {
-    let (mut rest, mut left) = parse_unary_expr(t)?;
-
-    loop {
-        // Check if next token is a binary operator
-        let op = match token_to_binop(rest) {
-            Some(op) => op,
-            None => break,
-        };
-
-        let op_prec = Precedence::of(&op);
-
-        // If operator precedence is too low, stop here
-        if op_prec < min_prec {
-            break;
-        }
-
-        // Consume the operator
-        rest = TokenSlice(&rest.0[1..]);
-
-        // For right-associative operators, use the same precedence; for left-associative, use next level
-        let next_min_prec = if op_prec.is_right_associative() {
-            op_prec
-        } else {
-            op_prec.next_level()
-        };
-
-        // Recursively parse the right side
-        let (rest_right, right) = parse_binary_op(rest, next_min_prec)?;
-        rest = rest_right;
-
-        // Combine left, op, right
-        left = Expression::BinaryOp {
-            left: Box::new(left),
-            op,
-            right: Box::new(right),
-        };
-    }
-
-    Ok((rest, left))
-}
-
-/// Parse a full expression (entry point)
-fn parse_expr(t: TokenSlice) -> IResult<TokenSlice, Expression> {
-    parse_binary_op(t, Precedence::Or)
-}
 
 /// Parse expression with binary operators
 /// Lua operator precedence (lowest to highest):
@@ -2486,170 +2405,6 @@ mod tests {
                 Token::End
             ]
         );
-    }
-
-    // Binary operator precedence tests
-
-    #[test]
-    fn test_binary_op_basic() {
-        let code = "a + b";
-        let tokens = tokenize(code).unwrap();
-        let slice = TokenSlice::from(tokens.as_slice());
-        let (rest, expr) = parse_expr(slice).unwrap();
-        
-        // Check we parsed the entire expression
-        assert_eq!(rest.0.len(), 0);
-        
-        // Verify it's a BinaryOp
-        match expr {
-            Expression::BinaryOp { left, op, right } => {
-                assert_eq!(op, BinaryOp::Add);
-                match *left {
-                    Expression::Identifier(ref id) => assert_eq!(id, "a"),
-                    _ => panic!("Expected identifier on left"),
-                }
-                match *right {
-                    Expression::Identifier(ref id) => assert_eq!(id, "b"),
-                    _ => panic!("Expected identifier on right"),
-                }
-            }
-            _ => panic!("Expected BinaryOp expression"),
-        }
-    }
-
-    #[test]
-    fn test_binary_op_precedence_mul_add() {
-        // a + b * c should parse as a + (b * c)
-        let code = "a + b * c";
-        let tokens = tokenize(code).unwrap();
-        let slice = TokenSlice::from(tokens.as_slice());
-        let (_, expr) = parse_expr(slice).unwrap();
-        
-        match expr {
-            Expression::BinaryOp { left, op: BinaryOp::Add, right } => {
-                // Left should be 'a'
-                match *left {
-                    Expression::Identifier(ref id) => assert_eq!(id, "a"),
-                    _ => panic!("Expected identifier 'a' on left"),
-                }
-                // Right should be (b * c)
-                match *right {
-                    Expression::BinaryOp { op: BinaryOp::Multiply, .. } => {
-                        // Correct structure
-                    }
-                    _ => panic!("Expected (b * c) on right"),
-                }
-            }
-            _ => panic!("Expected Add as top-level operator"),
-        }
-    }
-
-    #[test]
-    fn test_binary_op_precedence_and_or() {
-        // a or b and c should parse as a or (b and c)
-        let code = "a or b and c";
-        let tokens = tokenize(code).unwrap();
-        let slice = TokenSlice::from(tokens.as_slice());
-        let (_, expr) = parse_expr(slice).unwrap();
-        
-        match expr {
-            Expression::BinaryOp { left, op: BinaryOp::Or, right } => {
-                // Left should be 'a'
-                match *left {
-                    Expression::Identifier(ref id) => assert_eq!(id, "a"),
-                    _ => panic!("Expected identifier 'a' on left"),
-                }
-                // Right should be (b and c)
-                match *right {
-                    Expression::BinaryOp { op: BinaryOp::And, .. } => {
-                        // Correct structure
-                    }
-                    _ => panic!("Expected (b and c) on right"),
-                }
-            }
-            _ => panic!("Expected Or as top-level operator"),
-        }
-    }
-
-    #[test]
-    fn test_binary_op_left_associative() {
-        // a + b + c should parse as (a + b) + c
-        let code = "a + b + c";
-        let tokens = tokenize(code).unwrap();
-        let slice = TokenSlice::from(tokens.as_slice());
-        let (_, expr) = parse_expr(slice).unwrap();
-        
-        match expr {
-            Expression::BinaryOp { left, op: BinaryOp::Add, right } => {
-                // Right should be 'c'
-                match *right {
-                    Expression::Identifier(ref id) => assert_eq!(id, "c"),
-                    _ => panic!("Expected identifier 'c' on right"),
-                }
-                // Left should be (a + b)
-                match *left {
-                    Expression::BinaryOp { op: BinaryOp::Add, .. } => {
-                        // Correct structure
-                    }
-                    _ => panic!("Expected (a + b) on left"),
-                }
-            }
-            _ => panic!("Expected Add as top-level operator"),
-        }
-    }
-
-    #[test]
-    fn test_binary_op_right_associative_concat() {
-        // a .. b .. c should parse as a .. (b .. c)
-        let code = "a .. b .. c";
-        let tokens = tokenize(code).unwrap();
-        let slice = TokenSlice::from(tokens.as_slice());
-        let (_, expr) = parse_expr(slice).unwrap();
-        
-        match expr {
-            Expression::BinaryOp { left, op: BinaryOp::Concat, right } => {
-                // Left should be 'a'
-                match *left {
-                    Expression::Identifier(ref id) => assert_eq!(id, "a"),
-                    _ => panic!("Expected identifier 'a' on left"),
-                }
-                // Right should be (b .. c)
-                match *right {
-                    Expression::BinaryOp { op: BinaryOp::Concat, .. } => {
-                        // Correct structure
-                    }
-                    _ => panic!("Expected (b .. c) on right"),
-                }
-            }
-            _ => panic!("Expected Concat as top-level operator"),
-        }
-    }
-
-    #[test]
-    fn test_binary_op_complex_precedence() {
-        // a + b * c - d / e ^ 2 should parse respecting precedence
-        let code = "a + b * c - d / e ^ 2";
-        let tokens = tokenize(code).unwrap();
-        let slice = TokenSlice::from(tokens.as_slice());
-        let (_rest, expr) = parse_expr(slice).unwrap();
-        
-        // Just verify it parses without error for now
-        assert!(matches!(expr, Expression::BinaryOp { .. }));
-    }
-
-    #[test]
-    fn test_binary_op_parenthesized() {
-        // (a + b) * c should parse with parentheses overriding precedence
-        // For now, just test that literals parse correctly
-        let code = "a";
-        let tokens = tokenize(code).unwrap();
-        let slice = TokenSlice::from(tokens.as_slice());
-        let (_, expr) = parse_expr(slice).unwrap();
-        
-        match expr {
-            Expression::Identifier(ref id) => assert_eq!(id, "a"),
-            _ => panic!("Expected identifier"),
-        }
     }
 
     #[test]

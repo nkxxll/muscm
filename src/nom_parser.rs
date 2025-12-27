@@ -7,9 +7,9 @@ use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag};
 use nom::bytes::streaming::take_while;
 use nom::character::complete::{char, multispace0, one_of, satisfy};
-use nom::combinator::{cut, map, recognize};
+use nom::combinator::{map, recognize};
 use nom::multi::many0;
-use nom::sequence::{delimited, pair, preceded};
+use nom::sequence::{delimited, pair};
 use nom::{IResult, Parser};
 
 /// Parse a comment: ; followed by anything until newline

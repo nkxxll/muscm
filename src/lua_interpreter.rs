@@ -1,7 +1,9 @@
 use crate::lua_value::{LuaValue, LuaTable};
+use crate::module_loader::ModuleLoader;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::path::PathBuf;
 
 /// A call frame representing a function call context
 #[derive(Debug, Clone)]
@@ -95,6 +97,8 @@ pub struct LuaInterpreter {
     pub reachable_objects: HashSet<usize>,
     /// Maximum recursion depth to prevent stack overflow
     pub max_call_depth: usize,
+    /// Module loader for require() functionality
+    pub module_loader: Rc<RefCell<ModuleLoader>>,
 }
 
 impl LuaInterpreter {
@@ -105,6 +109,8 @@ impl LuaInterpreter {
 
     /// Create a new interpreter with custom max recursion depth
     pub fn with_max_depth(max_depth: usize) -> Self {
+        let module_loader = ModuleLoader::new();
+        
         let mut interpreter = LuaInterpreter {
             globals: HashMap::new(),
             scope_stack: Vec::new(),
@@ -112,6 +118,7 @@ impl LuaInterpreter {
             value_stack: ValueStack::new(),
             reachable_objects: HashSet::new(),
             max_call_depth: max_depth,
+            module_loader: Rc::new(RefCell::new(module_loader)),
         };
 
         // Initialize standard library
@@ -120,10 +127,124 @@ impl LuaInterpreter {
         interpreter
     }
 
+    /// Add a custom search path for modules
+    pub fn add_module_search_path(&mut self, path: PathBuf) {
+        self.module_loader.borrow_mut().add_search_path(path);
+    }
+
     /// Initialize standard library functions
     fn init_stdlib(&mut self) {
-        // Standard library functions will be added in Phase 6
-        // Placeholder for now
+        use crate::lua_value::LuaFunction;
+        use crate::stdlib;
+        
+        // Global I/O functions
+        self.globals.insert(
+            "print".to_string(),
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_print()))),
+        );
+        
+        // Global type functions
+        self.globals.insert(
+            "type".to_string(),
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_type()))),
+        );
+        
+        self.globals.insert(
+            "tonumber".to_string(),
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_tonumber()))),
+        );
+        
+        self.globals.insert(
+            "tostring".to_string(),
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_tostring()))),
+        );
+        
+        // Global iteration functions
+        self.globals.insert(
+            "pairs".to_string(),
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_pairs()))),
+        );
+        
+        self.globals.insert(
+            "ipairs".to_string(),
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_ipairs()))),
+        );
+        
+        self.globals.insert(
+            "next".to_string(),
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_next()))),
+        );
+        
+        // String table
+        self.globals.insert(
+            "string".to_string(),
+            stdlib::create_string_table(),
+        );
+        
+        // Math table
+        self.globals.insert(
+            "math".to_string(),
+            stdlib::create_math_table(),
+        );
+        
+        // Table table
+        self.globals.insert(
+            "table".to_string(),
+            stdlib::create_table_table(),
+        );
+        
+        // I/O table
+        self.globals.insert(
+            "io".to_string(),
+            stdlib::create_io_table(),
+        );
+        
+        // Phase 7: Metatables
+        self.globals.insert(
+            "setmetatable".to_string(),
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_setmetatable()))),
+        );
+        
+        self.globals.insert(
+            "getmetatable".to_string(),
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_getmetatable()))),
+        );
+        
+        // Phase 7: Error Handling
+        self.globals.insert(
+            "pcall".to_string(),
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_pcall()))),
+        );
+        
+        self.globals.insert(
+            "xpcall".to_string(),
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_xpcall()))),
+        );
+        
+        self.globals.insert(
+            "error".to_string(),
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(stdlib::create_error()))),
+        );
+        
+        // Phase 7: Coroutines
+        self.globals.insert(
+            "coroutine".to_string(),
+            stdlib::create_coroutine_table(),
+        );
+        
+        // Phase 8: File I/O & System Integration
+        self.globals.insert(
+            "os".to_string(),
+            stdlib::create_os_table(),
+        );
+        
+        // Phase 9: Module System
+        self.globals.insert(
+            "require".to_string(),
+            LuaValue::Function(Rc::new(LuaFunction::Builtin(
+                stdlib::create_require(Rc::clone(&self.module_loader)),
+            ))),
+        );
     }
 
     /// Push a new scope for block statements or function calls
@@ -334,7 +455,13 @@ mod tests {
     #[test]
     fn test_interpreter_creation() {
         let interp = LuaInterpreter::new();
-        assert_eq!(interp.globals.len(), 0);
+        // Phase 6+ stdlib adds global functions: print, type, tonumber, tostring, pairs, ipairs, next
+        // Plus library tables: string, math, table, io
+        // Phase 7 adds: setmetatable, getmetatable, pcall, xpcall, error, coroutine
+        // Phase 8 adds: os
+        // Phase 9 adds: require
+        // Total: 7 functions + 4 tables + 5 functions + 1 table + 1 table + 1 function = 19 globals
+        assert_eq!(interp.globals.len(), 19);
         assert!(interp.scope_stack.is_empty());
         assert!(interp.call_stack.is_empty());
         assert!(interp.value_stack.is_empty());
